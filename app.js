@@ -1,0 +1,1479 @@
+// Main application controller for ModSphere
+
+let isSpotlightActive = false;
+let spotlightPlaceholder = null;
+
+document.addEventListener("DOMContentLoaded", () => {
+  initApp();
+});
+
+// App State
+const state = {
+  currentView: "home", // home, browse, detail, create
+  selectedModId: null,
+  activeDetailTab: "description", // description, versions, gallery
+  filters: {
+    q: "",
+    type: "", // mod, modpack, resourcepack, plugin
+    categories: [],
+    loaders: [],
+    gameVersions: [],
+    sort: "downloads" // downloads, relevance, follows, updated, created
+  }
+};
+
+// Available Filter Options Meta-data (Russian Labels)
+const METADATA = {
+  types: {
+    mod: "Моды",
+    modpack: "Модпаки",
+    resourcepack: "Шейдеры и текстуры",
+    plugin: "Плагины"
+  },
+  categories: {
+    optimization: "Оптимизация",
+    client: "Клиент",
+    cosmetic: "Косметика",
+    technology: "Технологии",
+    design: "Декор",
+    automation: "Автоматизация",
+    adventure: "Приключения",
+    rpg: "RPG",
+    hardcore: "Хардкор",
+    utility: "Утилиты"
+  },
+  loaders: {
+    fabric: "Fabric",
+    forge: "Forge",
+    neoforge: "NeoForge",
+    quilt: "Quilt"
+  },
+  gameVersions: ["1.20.4", "1.20.2", "1.20.1", "1.19.4", "1.19.2", "1.18.2", "1.12.2"]
+};
+
+// Initialize Application
+function initApp() {
+  setupTheme();
+  setupRouting();
+  setupGlobalEvents();
+  setupSpotlightSearch();
+}
+
+// --- THEME MANAGEMENT ---
+function setupTheme() {
+  const savedTheme = localStorage.getItem("theme") || "dark";
+  const themeToggle = document.getElementById("theme-toggle");
+  
+  if (savedTheme === "light") {
+    document.body.classList.add("light-theme");
+    themeToggle.innerHTML = '<i class="fa-solid fa-sun"></i>';
+  } else {
+    document.body.classList.remove("light-theme");
+    themeToggle.innerHTML = '<i class="fa-solid fa-moon"></i>';
+  }
+
+  themeToggle.addEventListener("click", () => {
+    document.body.classList.toggle("light-theme");
+    const isLight = document.body.classList.contains("light-theme");
+    localStorage.setItem("theme", isLight ? "light" : "dark");
+    themeToggle.innerHTML = isLight ? '<i class="fa-solid fa-sun"></i>' : '<i class="fa-solid fa-moon"></i>';
+    showToast(isLight ? "Включена светлая тема" : "Включена темная тема", "info");
+  });
+}
+
+// --- ROUTING SYSTEM ---
+function setupRouting() {
+  window.addEventListener("hashchange", handleRoute);
+  window.addEventListener("load", handleRoute);
+}
+
+function handleRoute() {
+  const { path, params } = parseHash();
+  
+  // Highlight active header link
+  document.querySelectorAll(".nav-link").forEach(link => link.classList.remove("active"));
+  
+  // Collapse search input in header for Home page, show it for others
+  const headerSearch = document.getElementById("header-search-container");
+  if (path === "#/") {
+    headerSearch.style.display = "none";
+    document.getElementById("nav-home").classList.add("active");
+  } else {
+    headerSearch.style.display = "flex";
+    if (path === "#/browse") {
+      document.getElementById("nav-browse").classList.add("active");
+    } else if (path === "#/create") {
+      document.getElementById("nav-create").classList.add("active");
+    }
+  }
+
+  // Route Views
+  if (path === "#/") {
+    renderHome();
+  } else if (path === "#/browse") {
+    // Sync URL parameters to state.filters
+    state.filters.q = params.q || "";
+    state.filters.type = params.type || "";
+    state.filters.sort = params.sort || "downloads";
+    
+    // Parse array filters (e.g. loaders=fabric&loaders=forge)
+    state.filters.categories = parseArrayParam(params.categories);
+    state.filters.loaders = parseArrayParam(params.loaders);
+    state.filters.gameVersions = parseArrayParam(params.gameVersions);
+    
+    renderBrowse();
+  } else if (path.startsWith("#/mod/")) {
+    const slug = path.replace("#/mod/", "");
+    const mods = getMods();
+    const mod = mods.find(m => m.slug === slug || m.id === slug);
+    if (mod) {
+      state.selectedModId = mod.id;
+      renderModDetails(mod);
+    } else {
+      showToast("Мод не найден!", "info");
+      window.location.hash = "#/";
+    }
+  } else if (path === "#/create") {
+    renderCreateForm();
+  } else {
+    // Default fallback
+    window.location.hash = "#/";
+  }
+  
+  // Scroll to top
+  window.scrollTo(0, 0);
+}
+
+// Router Helpers
+function parseHash() {
+  const hash = window.location.hash || "#/";
+  const qMarkIndex = hash.indexOf("?");
+  const path = qMarkIndex !== -1 ? hash.substring(0, qMarkIndex) : hash;
+  const queryString = qMarkIndex !== -1 ? hash.substring(qMarkIndex + 1) : "";
+  
+  const params = {};
+  if (queryString) {
+    const pairs = queryString.split("&");
+    for (const pair of pairs) {
+      const [key, val] = pair.split("=");
+      const decodedKey = decodeURIComponent(key);
+      const decodedVal = decodeURIComponent(val || "");
+      
+      if (params[decodedKey]) {
+        if (Array.isArray(params[decodedKey])) {
+          params[decodedKey].push(decodedVal);
+        } else {
+          params[decodedKey] = [params[decodedKey], decodedVal];
+        }
+      } else {
+        params[decodedKey] = decodedVal;
+      }
+    }
+  }
+  return { path, params };
+}
+
+function parseArrayParam(param) {
+  if (!param) return [];
+  if (Array.isArray(param)) return param;
+  return [param];
+}
+
+function updateBrowseHash() {
+  const queryParts = [];
+  
+  if (state.filters.q) queryParts.push(`q=${encodeURIComponent(state.filters.q)}`);
+  if (state.filters.type) queryParts.push(`type=${encodeURIComponent(state.filters.type)}`);
+  if (state.filters.sort) queryParts.push(`sort=${encodeURIComponent(state.filters.sort)}`);
+  
+  state.filters.categories.forEach(c => queryParts.push(`categories=${encodeURIComponent(c)}`));
+  state.filters.loaders.forEach(l => queryParts.push(`loaders=${encodeURIComponent(l)}`));
+  state.filters.gameVersions.forEach(v => queryParts.push(`gameVersions=${encodeURIComponent(v)}`));
+  
+  const queryStr = queryParts.length ? `?${queryParts.join("&")}` : "";
+  
+  // Replace current hash state to avoid polluting search history step-by-step
+  window.history.replaceState(null, "", `#/browse${queryStr}`);
+  // Force update display
+  renderBrowseResults();
+}
+
+
+// --- GLOBAL NAVIGATION SEARCH EVENTS ---
+function setupGlobalEvents() {
+  const headerSearchInput = document.getElementById("header-search-input");
+  
+  headerSearchInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      const query = headerSearchInput.value.trim();
+      headerSearchInput.value = "";
+      window.location.hash = `#/browse?q=${encodeURIComponent(query)}`;
+    }
+  });
+
+  // Lightbox close events
+  const lightbox = document.getElementById("gallery-lightbox");
+  const closeBtn = lightbox.querySelector(".lightbox-close");
+  closeBtn.addEventListener("click", () => lightbox.classList.remove("active"));
+  lightbox.addEventListener("click", (e) => {
+    if (e.target === lightbox) lightbox.classList.remove("active");
+  });
+}
+
+
+// --- RENDER 1: HOME PAGE ---
+function renderHome() {
+  const container = document.getElementById("main-content");
+  const mods = getMods();
+  
+  // Calculate aggregate stats
+  const totalDownloads = mods.reduce((sum, m) => sum + m.downloads, 0);
+  const totalMods = mods.length;
+  const totalAuthors = new Set(mods.map(m => m.author)).size + 3; // mock extra creators
+  
+  // Take top 6 mods by downloads
+  const trendingMods = [...mods]
+    .sort((a, b) => b.downloads - a.downloads)
+    .slice(0, 6);
+
+  container.innerHTML = `
+    <!-- Hero Banner -->
+    <section class="hero-section">
+      <div class="hero-glow-1"></div>
+      <div class="hero-glow-2"></div>
+      <h1>Будущее моддинга Minecraft</h1>
+      <p>Современный, быстрый и безопасный репозиторий для ваших любимых модов, модпаков и шейдеров.</p>
+      
+      <div class="hero-search-container">
+        <div class="hero-search-bar" id="main-hero-search-bar">
+          <div class="hero-search-bar-row">
+            <i class="fa-solid fa-magnifying-glass search-icon-active" style="display:none; color:var(--primary-color); margin-left: 16px; margin-right: -4px; font-size:16px;"></i>
+            <input type="text" placeholder="Поиск модов, например: Sodium, Create..." id="hero-search-input" autocomplete="off">
+            <button id="hero-search-btn"><i class="fa-solid fa-magnifying-glass"></i> Искать</button>
+            <button id="hero-search-close-btn" style="display:none;" title="Закрыть (ESC)"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <div class="hero-search-results" id="hero-search-results" style="display:none;"></div>
+        </div>
+      </div>
+
+      <div class="quick-categories">
+        <button class="quick-cat-btn" data-cat="optimization"><i class="fa-solid fa-bolt"></i> Оптимизация</button>
+        <button class="quick-cat-btn" data-cat="technology"><i class="fa-solid fa-gears"></i> Инженерия</button>
+        <button class="quick-cat-btn" data-cat="adventure"><i class="fa-solid fa-compass"></i> Приключения</button>
+        <button class="quick-cat-btn" data-cat="cosmetic"><i class="fa-solid fa-wand-magic-sparkles"></i> Косметика</button>
+      </div>
+    </section>
+
+    <!-- Platform Stats -->
+    <section class="stats-banner">
+      <div class="stat-item">
+        <span class="stat-num" id="stat-downloads">${formatNumberFull(totalDownloads)}</span>
+        <span class="stat-label">Скачиваний</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-num" id="stat-mods">${totalMods}</span>
+        <span class="stat-label">Проектов в сети</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-num" id="stat-authors">${totalAuthors}</span>
+        <span class="stat-label">Создателей</span>
+      </div>
+    </section>
+
+    <!-- Trending Section -->
+    <section>
+      <div class="section-header">
+        <h2 class="section-title"><i class="fa-solid fa-fire"></i> Популярные проекты</h2>
+        <a href="#/browse" class="view-all-link">Все проекты <i class="fa-solid fa-arrow-right"></i></a>
+      </div>
+      <div class="mods-grid" id="trending-grid">
+        <!-- Rendered dynamically -->
+      </div>
+    </section>
+  `;
+
+  // Render trending cards
+  const trendingGrid = document.getElementById("trending-grid");
+  trendingMods.forEach(mod => {
+    trendingGrid.appendChild(createModCard(mod));
+  });
+
+  // Wire up Spotlight Search events
+  const heroSearchInput = document.getElementById("hero-search-input");
+  const heroSearchBtn = document.getElementById("hero-search-btn");
+  const heroSearchCloseBtn = document.getElementById("hero-search-close-btn");
+
+  // Clicking or focusing opens spotlight
+  heroSearchInput.addEventListener("focus", activateSpotlightSearch);
+  heroSearchInput.addEventListener("click", activateSpotlightSearch);
+  
+  // Close button
+  heroSearchCloseBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    deactivateSpotlightSearch();
+  });
+  
+  // Prevent default form submission and trigger spotlight
+  heroSearchBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!isSpotlightActive) {
+      activateSpotlightSearch();
+    } else {
+      // If active and has value, run search redirect
+      const query = heroSearchInput.value.trim();
+      if (query) {
+        deactivateSpotlightSearch();
+        setTimeout(() => {
+          window.location.hash = `#/browse?q=${encodeURIComponent(query)}`;
+        }, 350);
+      }
+    }
+  });
+
+  // Typing triggers filtering
+  heroSearchInput.addEventListener("input", () => {
+    if (isSpotlightActive) {
+      renderSpotlightResults(heroSearchInput.value);
+    }
+  });
+
+  // Quick categories navigation
+  document.querySelectorAll(".quick-cat-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const cat = btn.getAttribute("data-cat");
+      window.location.hash = `#/browse?categories=${encodeURIComponent(cat)}`;
+    });
+  });
+}
+
+// Card Renderer Helper
+function createModCard(mod) {
+  const card = document.createElement("div");
+  card.className = "mod-card";
+  card.addEventListener("click", () => {
+    window.location.hash = `#/mod/${mod.slug || mod.id}`;
+  });
+
+  const loadersBadges = mod.loaders.map(loader => 
+    `<span class="mod-card-badge">${METADATA.loaders[loader] || loader}</span>`
+  ).join(" ");
+
+  card.innerHTML = `
+    <div class="mod-card-header">
+      <div class="mod-card-icon" style="background-color: ${mod.iconColor || '#10b981'}">
+        ${mod.avatar || '📦'}
+      </div>
+      <div class="mod-card-details">
+        <h3 class="mod-card-title">${mod.name}</h3>
+        <span class="mod-card-author">от <strong>${mod.author}</strong></span>
+      </div>
+    </div>
+    <p class="mod-card-desc">${mod.shortDescription}</p>
+    <div class="mod-card-footer">
+      <div class="mod-card-stats">
+        <span class="mod-card-stat"><i class="fa-solid fa-download"></i> ${formatNumber(mod.downloads)}</span>
+        <span class="mod-card-stat"><i class="fa-solid fa-heart"></i> ${formatNumber(mod.follows)}</span>
+      </div>
+      <div class="mod-card-badges">
+        ${loadersBadges}
+      </div>
+    </div>
+  `;
+  return card;
+}
+
+
+// --- RENDER 2: BROWSE / SEARCH PAGE ---
+let searchDebounceTimeout = null;
+
+function renderBrowse() {
+  const container = document.getElementById("main-content");
+
+  container.innerHTML = `
+    <div class="browse-layout">
+      <!-- Left Sidebar Filters -->
+      <aside class="filters-sidebar">
+        <div class="filter-group">
+          <div class="filter-group-title">
+            <span>Тип проекта</span>
+            <button class="clear-group-btn" id="clear-type">Сбросить</button>
+          </div>
+          <div class="filter-options">
+            ${Object.entries(METADATA.types).map(([key, label]) => `
+              <label class="filter-checkbox-label">
+                <input type="radio" name="project-type" value="${key}" ${state.filters.type === key ? 'checked' : ''}>
+                <span>${label}</span>
+              </label>
+            `).join("")}
+          </div>
+        </div>
+
+        <div class="filter-group">
+          <div class="filter-group-title">
+            <span>Загрузчики</span>
+            <button class="clear-group-btn" id="clear-loaders">Сбросить</button>
+          </div>
+          <div class="filter-options" id="loader-options-container">
+            ${Object.entries(METADATA.loaders).map(([key, label]) => `
+              <label class="filter-checkbox-label">
+                <input type="checkbox" class="loader-cb" value="${key}" ${state.filters.loaders.includes(key) ? 'checked' : ''}>
+                <span>${label}</span>
+              </label>
+            `).join("")}
+          </div>
+        </div>
+
+        <div class="filter-group">
+          <div class="filter-group-title">
+            <span>Категории</span>
+            <button class="clear-group-btn" id="clear-categories">Сбросить</button>
+          </div>
+          <div class="filter-options">
+            ${Object.entries(METADATA.categories).map(([key, label]) => `
+              <label class="filter-checkbox-label">
+                <input type="checkbox" class="category-cb" value="${key}" ${state.filters.categories.includes(key) ? 'checked' : ''}>
+                <span>${label}</span>
+              </label>
+            `).join("")}
+          </div>
+        </div>
+
+        <div class="filter-group">
+          <div class="filter-group-title">
+            <span>Версии игры</span>
+            <button class="clear-group-btn" id="clear-gameVersions">Сбросить</button>
+          </div>
+          <div class="filter-options">
+            ${METADATA.gameVersions.map(version => `
+              <label class="filter-checkbox-label">
+                <input type="checkbox" class="version-cb" value="${version}" ${state.filters.gameVersions.includes(version) ? 'checked' : ''}>
+                <span>${version}</span>
+              </label>
+            `).join("")}
+          </div>
+        </div>
+      </aside>
+
+      <!-- Right Main Results Panel -->
+      <section class="browse-results-panel">
+        <!-- Search and Sort Panel -->
+        <div class="search-controls">
+          <div class="search-input-wrapper">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="text" placeholder="Поиск среди сотен дополнений..." id="browse-search-input" value="${state.filters.q}">
+          </div>
+          
+          <div class="sort-select-wrapper">
+            <span>Сортировка:</span>
+            <select id="browse-sort-select">
+              <option value="downloads" ${state.filters.sort === 'downloads' ? 'selected' : ''}>Скачивания</option>
+              <option value="follows" ${state.filters.sort === 'follows' ? 'selected' : ''}>Подписчики</option>
+              <option value="relevance" ${state.filters.sort === 'relevance' ? 'selected' : ''}>Название</option>
+              <option value="updated" ${state.filters.sort === 'updated' ? 'selected' : ''}>Обновлено</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Listing Area -->
+        <div class="results-list" id="results-list-container">
+          <!-- Rendered dynamically -->
+        </div>
+      </section>
+    </div>
+  `;
+
+  // Wire up sidebar filters interactive events
+  
+  // Project type (Radio inputs)
+  document.querySelectorAll('input[name="project-type"]').forEach(radio => {
+    radio.addEventListener("change", (e) => {
+      state.filters.type = e.target.value;
+      updateBrowseHash();
+    });
+  });
+
+  // Checkboxes list (loaders, categories, versions)
+  const setupCheckboxGroup = (selector, stateArrayKey) => {
+    document.querySelectorAll(selector).forEach(checkbox => {
+      checkbox.addEventListener("change", () => {
+        const val = checkbox.value;
+        if (checkbox.checked) {
+          if (!state[stateArrayKey].includes(val)) state[stateArrayKey].push(val);
+        } else {
+          state[stateArrayKey] = state[stateArrayKey].filter(x => x !== val);
+        }
+        updateBrowseHash();
+      });
+    });
+  };
+
+  setupCheckboxGroup(".loader-cb", "filters").loaders = state.filters.loaders; // Bind context
+  setupCheckboxGroup(".category-cb", "filters").categories = state.filters.categories;
+  setupCheckboxGroup(".version-cb", "filters").gameVersions = state.filters.gameVersions;
+
+  // Re-bind to ensure state matches (vanilla JS array passing helper)
+  const syncGroupCheckbox = (selector, filterArray) => {
+    document.querySelectorAll(selector).forEach(cb => {
+      cb.addEventListener("change", () => {
+        const checkedValues = Array.from(document.querySelectorAll(`${selector}:checked`)).map(c => c.value);
+        filterArray.length = 0;
+        checkedValues.forEach(v => filterArray.push(v));
+        updateBrowseHash();
+      });
+    });
+  };
+  syncGroupCheckbox(".loader-cb", state.filters.loaders);
+  syncGroupCheckbox(".category-cb", state.filters.categories);
+  syncGroupCheckbox(".version-cb", state.filters.gameVersions);
+
+  // Clear Buttons
+  document.getElementById("clear-type").addEventListener("click", () => {
+    document.querySelectorAll('input[name="project-type"]').forEach(r => r.checked = false);
+    state.filters.type = "";
+    updateBrowseHash();
+  });
+  
+  const setupClearBtn = (btnId, cbSelector, filterArray) => {
+    document.getElementById(btnId).addEventListener("click", () => {
+      document.querySelectorAll(cbSelector).forEach(c => c.checked = false);
+      filterArray.length = 0;
+      updateBrowseHash();
+    });
+  };
+  setupClearBtn("clear-loaders", ".loader-cb", state.filters.loaders);
+  setupClearBtn("clear-categories", ".category-cb", state.filters.categories);
+  setupClearBtn("clear-gameVersions", ".version-cb", state.filters.gameVersions);
+
+  // Search Input debounced
+  const browseSearchInput = document.getElementById("browse-search-input");
+  browseSearchInput.addEventListener("input", () => {
+    clearTimeout(searchDebounceTimeout);
+    searchDebounceTimeout = setTimeout(() => {
+      state.filters.q = browseSearchInput.value.trim();
+      updateBrowseHash();
+    }, 250);
+  });
+
+  // Sort dropdown
+  document.getElementById("browse-sort-select").addEventListener("change", (e) => {
+    state.filters.sort = e.target.value;
+    updateBrowseHash();
+  });
+
+  // Render search results for the first time
+  renderBrowseResults();
+}
+
+function renderBrowseResults() {
+  const container = document.getElementById("results-list-container");
+  const mods = getMods();
+  
+  // Apply filtering
+  let filtered = mods.filter(mod => {
+    // 1. Search text
+    if (state.filters.q) {
+      const query = state.filters.q.toLowerCase();
+      const nameMatch = mod.name.toLowerCase().includes(query);
+      const descMatch = mod.shortDescription.toLowerCase().includes(query);
+      const authorMatch = mod.author.toLowerCase().includes(query);
+      if (!nameMatch && !descMatch && !authorMatch) return false;
+    }
+    
+    // 2. Project type
+    if (state.filters.type && mod.type !== state.filters.type) {
+      return false;
+    }
+    
+    // 3. Loaders
+    if (state.filters.loaders.length > 0) {
+      // Must match at least one selected loader
+      const hasMatchingLoader = mod.loaders.some(l => state.filters.loaders.includes(l));
+      if (!hasMatchingLoader) return false;
+    }
+    
+    // 4. Categories
+    if (state.filters.categories.length > 0) {
+      // Must contain all of the selected categories
+      const hasAllCategories = state.filters.categories.every(cat => mod.categories.includes(cat));
+      if (!hasAllCategories) return false;
+    }
+    
+    // 5. Game Versions
+    if (state.filters.gameVersions.length > 0) {
+      // Must match at least one selected version
+      const hasMatchingVersion = mod.gameVersions.some(v => state.filters.gameVersions.includes(v));
+      if (!hasMatchingVersion) return false;
+    }
+    
+    return true;
+  });
+
+  // Apply Sorting
+  filtered.sort((a, b) => {
+    if (state.filters.sort === "downloads") {
+      return b.downloads - a.downloads;
+    }
+    if (state.filters.sort === "follows") {
+      return b.follows - a.follows;
+    }
+    if (state.filters.sort === "relevance") {
+      return a.name.localeCompare(b.name);
+    }
+    if (state.filters.sort === "updated") {
+      return new Date(b.updatedAt) - new Date(a.updatedAt);
+    }
+    return 0;
+  });
+
+  // Render list
+  if (filtered.length === 0) {
+    container.innerHTML = `
+      <div class="no-results">
+        <i class="fa-solid fa-folder-open"></i>
+        <h3>Ничего не найдено</h3>
+        <p>Попробуйте смягчить фильтры поиска или изменить ключевые слова.</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = "";
+  filtered.forEach(mod => {
+    const item = document.createElement("div");
+    item.className = "result-item";
+    item.addEventListener("click", () => {
+      window.location.hash = `#/mod/${mod.slug || mod.id}`;
+    });
+
+    const categoryBadges = mod.categories.slice(0, 3).map(cat => 
+      `<span class="result-tag">${METADATA.categories[cat] || cat}</span>`
+    ).join("");
+
+    const loadersBadges = mod.loaders.map(l => 
+      `<span class="result-tag" style="background: rgba(16, 185, 129, 0.08); color: var(--primary-color); font-weight: 600;">${METADATA.loaders[l] || l}</span>`
+    ).join("");
+
+    item.innerHTML = `
+      <div class="result-icon" style="background-color: ${mod.iconColor || '#10b981'}">
+        ${mod.avatar || '📦'}
+      </div>
+      <div class="result-info">
+        <div class="result-title-row">
+          <h3 class="result-title">${mod.name}</h3>
+          <span class="result-badge-type">${METADATA.types[mod.type] || mod.type}</span>
+        </div>
+        <p class="result-desc">${mod.shortDescription}</p>
+        <div class="result-tags">
+          ${loadersBadges}
+          ${categoryBadges}
+        </div>
+      </div>
+      <div class="result-stats">
+        <div><i class="fa-solid fa-download"></i> <span class="result-stat-val">${formatNumber(mod.downloads)}</span></div>
+        <div><i class="fa-solid fa-heart"></i> <span class="result-stat-val">${formatNumber(mod.follows)}</span></div>
+        <div style="font-size: 11px;">Обновлен: ${formatDate(mod.updatedAt)}</div>
+      </div>
+    `;
+    container.appendChild(item);
+  });
+}
+
+
+// --- RENDER 3: MOD DETAILS PAGE ---
+function renderModDetails(mod) {
+  const container = document.getElementById("main-content");
+  state.activeDetailTab = "description"; // Reset tab
+
+  const followed = isModFollowed(mod.id);
+
+  container.innerHTML = `
+    <!-- Header -->
+    <div class="mod-detail-header">
+      <div class="mod-detail-icon" style="background-color: ${mod.iconColor || '#10b981'}">
+        ${mod.avatar || '📦'}
+      </div>
+      <div class="mod-detail-meta">
+        <div class="mod-detail-title-row">
+          <h1 class="mod-detail-title">${mod.name}</h1>
+          <span class="result-badge-type">${METADATA.types[mod.type] || mod.type}</span>
+        </div>
+        <p class="mod-detail-author-tag">от разработчика <span>${mod.author}</span></p>
+        <p class="mod-detail-desc">${mod.shortDescription}</p>
+        
+        <div class="mod-detail-actions">
+          <button class="btn btn-primary" id="btn-main-download"><i class="fa-solid fa-download"></i> Скачать последний файл</button>
+          <button class="btn btn-secondary ${followed ? 'active' : ''}" id="btn-follow-toggle">
+            <i class="${followed ? 'fa-solid' : 'fa-regular'} fa-heart"></i> 
+            <span id="follow-text">${followed ? 'Вы подписаны' : 'В избранное'}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Columns -->
+    <div class="mod-details-grid">
+      <!-- Left Tab Area -->
+      <div class="tab-content-panel">
+        <nav class="tabs-nav">
+          <button class="tab-btn active" data-tab="description"><i class="fa-solid fa-file-lines"></i> Описание</button>
+          <button class="tab-btn" data-tab="versions"><i class="fa-solid fa-code-branch"></i> Версии (${mod.versions.length})</button>
+          <button class="tab-btn" data-tab="gallery"><i class="fa-solid fa-images"></i> Галерея (${mod.gallery ? mod.gallery.length : 0})</button>
+        </nav>
+
+        <!-- Description Tab -->
+        <div class="tab-panel active" id="panel-description">
+          <div class="rich-description">
+            ${mod.description}
+          </div>
+        </div>
+
+        <!-- Versions Tab -->
+        <div class="tab-panel" id="panel-versions">
+          <div class="versions-list" id="versions-container">
+            <!-- Versions inserted here -->
+          </div>
+        </div>
+
+        <!-- Gallery Tab -->
+        <div class="tab-panel" id="panel-gallery">
+          <div class="gallery-grid" id="gallery-container">
+            <!-- Images inserted here -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Metadata Sidebar -->
+      <aside class="details-sidebar">
+        <div class="sidebar-panel">
+          <h3 class="sidebar-panel-title">Статистика</h3>
+          <div class="metadata-table">
+            <div class="metadata-row">
+              <span class="metadata-label">Скачивания</span>
+              <span class="metadata-value" id="detail-stat-downloads">${formatNumberFull(mod.downloads)}</span>
+            </div>
+            <div class="metadata-row">
+              <span class="metadata-label">Подписчики</span>
+              <span class="metadata-value" id="detail-stat-follows">${formatNumberFull(mod.follows)}</span>
+            </div>
+            <div class="metadata-row">
+              <span class="metadata-label">Лицензия</span>
+              <span class="metadata-value">${mod.license}</span>
+            </div>
+            <div class="metadata-row">
+              <span class="metadata-label">Создан</span>
+              <span class="metadata-value">${formatDate(mod.createdAt)}</span>
+            </div>
+            <div class="metadata-row">
+              <span class="metadata-label">Обновлен</span>
+              <span class="metadata-value">${formatDate(mod.updatedAt)}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="sidebar-panel">
+          <h3 class="sidebar-panel-title">Ссылки</h3>
+          <div class="sidebar-links">
+            ${mod.sourceUrl ? `<a href="${mod.sourceUrl}" target="_blank" rel="noopener" class="sidebar-link"><i class="fa-brands fa-github"></i> Исходный код</a>` : ''}
+            ${mod.issuesUrl ? `<a href="${mod.issuesUrl}" target="_blank" rel="noopener" class="sidebar-link"><i class="fa-solid fa-bug"></i> Сообщить об ошибке</a>` : ''}
+            ${mod.wikiUrl ? `<a href="${mod.wikiUrl}" target="_blank" rel="noopener" class="sidebar-link"><i class="fa-solid fa-book"></i> База знаний (Wiki)</a>` : ''}
+            <a href="https://discord.gg" target="_blank" rel="noopener" class="sidebar-link"><i class="fa-brands fa-discord"></i> Сообщество Discord</a>
+          </div>
+        </div>
+
+        <div class="sidebar-panel">
+          <h3 class="sidebar-panel-title">Загрузчики & Теги</h3>
+          <div class="result-tags">
+            ${mod.loaders.map(l => `<span class="result-tag" style="background: rgba(16, 185, 129, 0.08); color: var(--primary-color); font-weight:600;">${METADATA.loaders[l] || l}</span>`).join("")}
+            ${mod.categories.map(c => `<span class="result-tag">${METADATA.categories[c] || c}</span>`).join("")}
+          </div>
+        </div>
+      </aside>
+    </div>
+  `;
+
+  // --- ACTIONS WIRE UP ---
+  
+  // Follow/Unfollow Toggle
+  const followBtn = document.getElementById("btn-follow-toggle");
+  followBtn.addEventListener("click", () => {
+    const res = toggleModFollow(mod.id);
+    const isNowFollowing = res.isFollowing;
+    
+    // Update local variables in view
+    const targetMod = res.mods.find(m => m.id === mod.id);
+    if (targetMod) {
+      document.getElementById("detail-stat-follows").textContent = formatNumberFull(targetMod.follows);
+    }
+    
+    // Update button states
+    followBtn.classList.toggle("active", isNowFollowing);
+    const icon = followBtn.querySelector("i");
+    icon.className = isNowFollowing ? "fa-solid fa-heart" : "fa-regular fa-heart";
+    document.getElementById("follow-text").textContent = isNowFollowing ? "Вы подписаны" : "В избранное";
+    
+    showToast(isNowFollowing ? `Вы подписались на ${mod.name}` : `Вы отписались от ${mod.name}`, "success");
+  });
+
+  // Main download button downloads the first available version
+  const mainDownloadBtn = document.getElementById("btn-main-download");
+  mainDownloadBtn.addEventListener("click", () => {
+    if (mod.versions && mod.versions.length > 0) {
+      triggerVersionDownload(mod, mod.versions[0]);
+    } else {
+      showToast("Нет доступных версий файла!", "info");
+    }
+  });
+
+  // Tab switcher
+  document.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      // Toggle nav
+      document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      
+      // Toggle panels
+      const targetTab = btn.getAttribute("data-tab");
+      document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+      document.getElementById(`panel-${targetTab}`).classList.add("active");
+      
+      state.activeDetailTab = targetTab;
+      
+      // Lazily render content if needed
+      if (targetTab === "versions") {
+        renderModVersions(mod);
+      } else if (targetTab === "gallery") {
+        renderModGallery(mod);
+      }
+    });
+  });
+}
+
+// Subrender: Versions Tab
+function renderModVersions(mod) {
+  const container = document.getElementById("versions-container");
+  if (!mod.versions || mod.versions.length === 0) {
+    container.innerHTML = `<div style="text-align: center; color: var(--text-muted); padding: 24px;">Версии не загружены для этого проекта.</div>`;
+    return;
+  }
+
+  container.innerHTML = "";
+  mod.versions.forEach(ver => {
+    const item = document.createElement("div");
+    item.className = "version-item";
+
+    const loadersStr = ver.loaders.map(l => `<span class="result-tag" style="background: rgba(16, 185, 129, 0.08); color: var(--primary-color);">${METADATA.loaders[l] || l}</span>`).join(" ");
+    const gameVersionsStr = ver.gameVersions.join(", ");
+
+    item.innerHTML = `
+      <div class="version-header-row">
+        <div class="version-title-group">
+          <span class="version-title">${ver.name}</span>
+          <span class="version-badge-type ${ver.type}">${ver.type}</span>
+        </div>
+        <button class="btn btn-primary btn-sm btn-dl-ver" data-ver-id="${ver.id}">
+          <i class="fa-solid fa-download"></i> Скачать
+        </button>
+      </div>
+      
+      <div class="version-changelog">
+        <strong>Список изменений:</strong> ${ver.changelog || 'Без описания изменений.'}
+      </div>
+
+      <div class="version-download-row">
+        <div class="file-info">
+          <i class="fa-solid fa-file-zipper"></i> Имя файла: <span>${ver.filename}</span> (${ver.fileSize})
+        </div>
+        <div class="version-metadata">
+          <div class="version-metadata-item"><i class="fa-solid fa-gamepad"></i> Версия игры: <span>${gameVersionsStr}</span></div>
+          <div class="version-metadata-item"><i class="fa-solid fa-download"></i> Загрузок: <span class="ver-dl-cnt">${formatNumber(ver.downloads)}</span></div>
+          <div class="version-metadata-item"><i class="fa-solid fa-calendar"></i> Загружен: <span>${formatDate(ver.uploadedAt)}</span></div>
+        </div>
+      </div>
+    `;
+    
+    // Wire up download button
+    item.querySelector(".btn-dl-ver").addEventListener("click", () => {
+      triggerVersionDownload(mod, ver, item.querySelector(".ver-dl-cnt"));
+    });
+
+    container.appendChild(item);
+  });
+}
+
+// Subrender: Gallery Tab
+function renderModGallery(mod) {
+  const container = document.getElementById("gallery-container");
+  if (!mod.gallery || mod.gallery.length === 0) {
+    container.innerHTML = `<div style="text-align: center; color: var(--text-muted); padding: 24px;">Изображения отсутствуют.</div>`;
+    return;
+  }
+
+  container.innerHTML = "";
+  mod.gallery.forEach(imgUrl => {
+    const item = document.createElement("div");
+    item.className = "gallery-item";
+    
+    item.innerHTML = `
+      <img src="${imgUrl}" alt="Скриншот галереи">
+      <div class="gallery-item-overlay">
+        <i class="fa-solid fa-magnifying-glass-plus"></i>
+      </div>
+    `;
+
+    // Click to open Lightbox
+    item.addEventListener("click", () => {
+      const lightbox = document.getElementById("gallery-lightbox");
+      const lightboxImg = lightbox.querySelector(".lightbox-img");
+      lightboxImg.src = imgUrl;
+      lightbox.classList.add("active");
+    });
+
+    container.appendChild(item);
+  });
+}
+
+// Download Simulation Action
+function triggerVersionDownload(mod, version, countSpanElement) {
+  // Start simulation animation
+  showToast(`Загрузка файла ${version.filename}...`, "info");
+  
+  setTimeout(() => {
+    // Simulated completion
+    updateModDownloads(mod.id, version.id);
+    
+    // Refresh stats in local state
+    const currentMods = getMods();
+    const updatedMod = currentMods.find(m => m.id === mod.id);
+    const updatedVer = updatedMod.versions.find(v => v.id === version.id);
+    
+    // Update counters in UI
+    const detailDownloads = document.getElementById("detail-stat-downloads");
+    if (detailDownloads) {
+      detailDownloads.textContent = formatNumberFull(updatedMod.downloads);
+      detailDownloads.style.animation = "none";
+      setTimeout(() => detailDownloads.style.animation = "pulseGlow 1s ease", 10);
+    }
+    
+    if (countSpanElement) {
+      countSpanElement.textContent = formatNumber(updatedVer.downloads);
+    }
+    
+    // Trigger virtual file download
+    const blob = new Blob([`Dummy JAR content for ${mod.name}`], { type: "application/java-archive" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = version.filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    showToast(`Файл ${version.filename} успешно сохранен!`, "success");
+  }, 1200);
+}
+
+
+// --- RENDER 4: CREATE MOD VIEW (FORM) ---
+function renderCreateForm() {
+  const container = document.getElementById("main-content");
+  
+  // Custom states for form
+  let selectedEmoji = "📦";
+  let selectedColor = "#10b981";
+  
+  const emojis = ["📦", "⚙️", "⚡", "👁️", "🏔️", "✨", "🐉", "📖", "🔨", "🧩", "🧪", "🚀"];
+  const colors = ["#10b981", "#a855f7", "#f59e0b", "#ef4444", "#dc2626", "#3b82f6", "#06b6d4", "#ec4899", "#8b5cf6"];
+
+  container.innerHTML = `
+    <div class="form-panel">
+      <h2 class="form-title">Создание нового проекта</h2>
+      <p class="form-subtitle">Загрузите свой мод, модпак или ресурспак и поделитесь им с миллионами игроков.</p>
+      
+      <form id="create-mod-form">
+        <div class="form-grid">
+          
+          <!-- Name -->
+          <div class="form-group">
+            <label class="form-label">Название проекта *</label>
+            <input type="text" class="form-input" id="form-name" required placeholder="Например: Create Astral">
+          </div>
+
+          <!-- URL Slug -->
+          <div class="form-group">
+            <label class="form-label">Уникальный ID (Slug) *</label>
+            <input type="text" class="form-input" id="form-slug" required placeholder="create-astral">
+          </div>
+
+          <!-- Type selection -->
+          <div class="form-group">
+            <label class="form-label">Тип проекта</label>
+            <select class="form-select" id="form-type">
+              <option value="mod">Мод</option>
+              <option value="modpack">Модпак</option>
+              <option value="resourcepack">Шейдер / Текстурпак</option>
+              <option value="plugin">Плагин</option>
+            </select>
+          </div>
+
+          <!-- License -->
+          <div class="form-group">
+            <label class="form-label">Лицензия</label>
+            <input type="text" class="form-input" id="form-license" value="MIT" placeholder="MIT, LGPL-3.0, Proprietary">
+          </div>
+
+          <!-- Avatar / Logo Customizer -->
+          <div class="form-group full-width">
+            <label class="form-label">Настройка иконки проекта</label>
+            <div class="avatar-picker">
+              <div class="avatar-preview" id="form-avatar-preview" style="background-color: ${selectedColor}">
+                ${selectedEmoji}
+              </div>
+              <div class="avatar-inputs">
+                <div class="form-label" style="font-size: 12px; color: var(--text-secondary);">Выберите символ:</div>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                  ${emojis.map(e => `<span class="emoji-choice" style="cursor:pointer; font-size: 20px; padding: 4px; border-radius:4px;" data-emoji="${e}">${e}</span>`).join("")}
+                </div>
+                <div class="form-label" style="font-size: 12px; color: var(--text-secondary); margin-top: 6px;">Выберите цвет фона:</div>
+                <div class="avatar-color-choices">
+                  ${colors.map(c => `
+                    <div class="color-dot ${c === selectedColor ? 'selected' : ''}" style="background-color: ${c}" data-color="${c}"></div>
+                  `).join("")}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Short Description -->
+          <div class="form-group full-width">
+            <label class="form-label">Краткое описание проекта *</label>
+            <input type="text" class="form-input" id="form-short-desc" required placeholder="Кратко расскажите о функциях мода (до 120 символов)..." maxlength="150">
+          </div>
+
+          <!-- Long Description -->
+          <div class="form-group full-width">
+            <label class="form-label">Полное описание (Поддерживает HTML разметку) *</label>
+            <textarea class="form-textarea" id="form-desc" required placeholder="Подробно расскажите о функциях, инструкциях по установке и особенностях вашего дополнения..."></textarea>
+          </div>
+
+          <!-- Loaders -->
+          <div class="form-group full-width">
+            <label class="form-label">Поддерживаемые загрузчики</label>
+            <div class="form-checkbox-group">
+              ${Object.entries(METADATA.loaders).map(([key, label]) => `
+                <label class="form-checkbox-label">
+                  <input type="checkbox" name="form-loader" value="${key}">
+                  <span>${label}</span>
+                </label>
+              `).join("")}
+            </div>
+          </div>
+
+          <!-- Game Versions -->
+          <div class="form-group full-width">
+            <label class="form-label">Поддерживаемые версии Minecraft</label>
+            <div class="form-checkbox-group">
+              ${METADATA.gameVersions.map(v => `
+                <label class="form-checkbox-label">
+                  <input type="checkbox" name="form-version" value="${v}">
+                  <span>${v}</span>
+                </label>
+              `).join("")}
+            </div>
+          </div>
+
+          <!-- Categories -->
+          <div class="form-group full-width">
+            <label class="form-label">Категории</label>
+            <div class="form-checkbox-group">
+              ${Object.entries(METADATA.categories).map(([key, label]) => `
+                <label class="form-checkbox-label">
+                  <input type="checkbox" name="form-category" value="${key}">
+                  <span>${label}</span>
+                </label>
+              `).join("")}
+            </div>
+          </div>
+
+          <!-- Code Links -->
+          <div class="form-group">
+            <label class="form-label">Ссылка на исходный код (GitHub)</label>
+            <input type="url" class="form-input" id="form-source" placeholder="https://github.com/username/project">
+          </div>
+
+          <!-- Issues Link -->
+          <div class="form-group">
+            <label class="form-label">Ссылка на трекер ошибок (Issues)</label>
+            <input type="url" class="form-input" id="form-issues" placeholder="https://github.com/username/project/issues">
+          </div>
+
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" id="btn-cancel-create">Отменить</button>
+          <button type="submit" class="btn btn-primary"><i class="fa-solid fa-upload"></i> Опубликовать проект</button>
+        </div>
+      </form>
+    </div>
+  `;
+
+  // --- INTERACTIVE EVENTS ---
+
+  const previewEl = document.getElementById("form-avatar-preview");
+  
+  // Custom Emoji choices
+  document.querySelectorAll(".emoji-choice").forEach(choice => {
+    choice.addEventListener("click", () => {
+      selectedEmoji = choice.getAttribute("data-emoji");
+      previewEl.textContent = selectedEmoji;
+    });
+  });
+
+  // Color selection choices
+  document.querySelectorAll(".color-dot").forEach(dot => {
+    dot.addEventListener("click", () => {
+      document.querySelectorAll(".color-dot").forEach(d => d.classList.remove("selected"));
+      dot.classList.add("selected");
+      selectedColor = dot.getAttribute("data-color");
+      previewEl.style.backgroundColor = selectedColor;
+    });
+  });
+
+  // Cancel Button
+  document.getElementById("btn-cancel-create").addEventListener("click", () => {
+    window.location.hash = "#/";
+  });
+
+  // Form Submission
+  const form = document.getElementById("create-mod-form");
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+
+    // Collect data
+    const name = document.getElementById("form-name").value.trim();
+    const slug = document.getElementById("form-slug").value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+    const type = document.getElementById("form-type").value;
+    const license = document.getElementById("form-license").value.trim() || "MIT";
+    const shortDesc = document.getElementById("form-short-desc").value.trim();
+    const desc = document.getElementById("form-desc").value.trim();
+    const source = document.getElementById("form-source").value.trim();
+    const issues = document.getElementById("form-issues").value.trim();
+    
+    const loaders = Array.from(document.querySelectorAll('input[name="form-loader"]:checked')).map(c => c.value);
+    const gameVersions = Array.from(document.querySelectorAll('input[name="form-version"]:checked')).map(c => c.value);
+    const categories = Array.from(document.querySelectorAll('input[name="form-category"]:checked')).map(c => c.value);
+
+    // Validations
+    if (loaders.length === 0) {
+      showToast("Выберите хотя бы один загрузчик модов!", "info");
+      return;
+    }
+    if (gameVersions.length === 0) {
+      showToast("Выберите хотя бы одну версию игры!", "info");
+      return;
+    }
+
+    const newMod = {
+      id: slug, // use slug as unique ID
+      name,
+      slug,
+      author: "MineDev", // Current mock username
+      avatar: selectedEmoji,
+      iconColor: selectedColor,
+      shortDescription: shortDesc,
+      description: desc,
+      type,
+      categories,
+      loaders,
+      gameVersions,
+      downloads: 0,
+      follows: 0,
+      license,
+      sourceUrl: source || null,
+      issuesUrl: issues || null,
+      gallery: [],
+    };
+
+    // Save
+    saveMod(newMod);
+    showToast("Проект успешно опубликован!", "success");
+
+    // Redirect to detail page
+    setTimeout(() => {
+      window.location.hash = `#/mod/${slug}`;
+    }, 800);
+  });
+}
+
+
+// --- UTILITIES ---
+
+// Date Formatter helper
+function formatDate(dateString) {
+  if (!dateString) return "Неизвестно";
+  const date = new Date(dateString);
+  const options = { day: 'numeric', month: 'short', year: 'numeric' };
+  return date.toLocaleDateString('ru-RU', options);
+}
+
+// Number Formatter (compact format: 14.5M, 12.3k)
+function formatNumber(num) {
+  if (num >= 1000000) {
+    return (num / 1000000).toFixed(1).replace(".0", "") + "M";
+  }
+  if (num >= 1000) {
+    return (num / 1000).toFixed(1).replace(".0", "") + "k";
+  }
+  return num.toString();
+}
+
+// Full Number formatter (comma separated: 14 502 034)
+function formatNumberFull(num) {
+  return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+}
+
+// Toast message notifications
+function showToast(message, type = "success") {
+  const container = document.getElementById("toast-container");
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${type}`;
+  
+  const icon = type === "success" 
+    ? '<i class="fa-solid fa-circle-check"></i>' 
+    : '<i class="fa-solid fa-circle-info"></i>';
+    
+  toast.innerHTML = `${icon} <span>${message}</span>`;
+  container.appendChild(toast);
+  
+  // Slide out and remove
+  setTimeout(() => {
+    toast.classList.add("fade-out");
+    toast.addEventListener("animationend", () => {
+      toast.remove();
+    });
+  }, 3000);
+}
+
+// --- SPOTLIGHT SEARCH LOGIC ---
+function setupSpotlightSearch() {
+  const backdrop = document.getElementById("search-backdrop");
+  backdrop.addEventListener("click", deactivateSpotlightSearch);
+
+  // Global key bindings (Escape to close, Ctrl+K or Cmd+K to open)
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && isSpotlightActive) {
+      deactivateSpotlightSearch();
+    }
+    
+    // Trigger search overlay using Ctrl+K / Cmd+K
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+      e.preventDefault();
+      const heroInput = document.getElementById("hero-search-input");
+      if (heroInput) {
+        activateSpotlightSearch();
+      } else {
+        const headerInput = document.getElementById("header-search-input");
+        if (headerInput) headerInput.focus();
+      }
+    }
+  });
+}
+
+function activateSpotlightSearch() {
+  if (isSpotlightActive) return;
+  
+  const searchBar = document.getElementById("main-hero-search-bar");
+  const backdrop = document.getElementById("search-backdrop");
+  const closeBtn = document.getElementById("hero-search-close-btn");
+  const resultsDiv = document.getElementById("hero-search-results");
+  const input = document.getElementById("hero-search-input");
+  const activeIcon = searchBar.querySelector(".search-icon-active");
+  
+  if (!searchBar) return;
+  
+  isSpotlightActive = true;
+  
+  // 1. Get original coordinates
+  const rect = searchBar.getBoundingClientRect();
+  
+  // 2. Insert placeholder into the layout to prevent content jumping
+  spotlightPlaceholder = document.createElement("div");
+  spotlightPlaceholder.className = "hero-search-placeholder";
+  spotlightPlaceholder.style.height = `${rect.height}px`;
+  spotlightPlaceholder.style.width = `${rect.width}px`;
+  const computedStyle = window.getComputedStyle(searchBar);
+  spotlightPlaceholder.style.margin = computedStyle.margin;
+  searchBar.parentNode.insertBefore(spotlightPlaceholder, searchBar);
+  
+  // Move searchBar to body level so it renders on top of the backdrop, bypassing blurred parent stacking contexts
+  document.body.appendChild(searchBar);
+  
+  // 3. Pin search bar to fixed screen coordinates (no transition)
+  searchBar.style.transition = "none";
+  searchBar.style.position = "fixed";
+  searchBar.style.top = `${rect.top}px`;
+  searchBar.style.left = `${rect.left}px`;
+  searchBar.style.width = `${rect.width}px`;
+  searchBar.style.height = `${rect.height}px`;
+  searchBar.style.margin = "0";
+  searchBar.style.zIndex = "2000";
+  
+  // 4. Activate backdrop overlay and block body scroll
+  backdrop.classList.add("active");
+  document.body.style.overflow = "hidden";
+  
+  // 5. Force browser reflow to apply the fixed position
+  searchBar.offsetHeight;
+  
+  // 6. Set transitions and animate to spotlight target position
+  searchBar.style.transition = "";
+  searchBar.classList.add("active-spotlight");
+  
+  const targetWidth = Math.min(680, window.innerWidth - 40);
+  const targetLeft = (window.innerWidth - targetWidth) / 2;
+  
+  searchBar.style.top = "100px";
+  searchBar.style.left = `${targetLeft}px`;
+  searchBar.style.width = `${targetWidth}px`;
+  searchBar.style.height = "auto";
+  
+  // Show active search elements
+  closeBtn.style.display = "flex";
+  resultsDiv.style.display = "flex";
+  if (activeIcon) activeIcon.style.display = "block";
+  
+  // Populate suggestions
+  renderSpotlightResults(input.value);
+  
+  // Focus the input inside the active search bar
+  setTimeout(() => {
+    input.focus();
+  }, 100);
+}
+
+function deactivateSpotlightSearch() {
+  if (!isSpotlightActive) return;
+  
+  const searchBar = document.getElementById("main-hero-search-bar");
+  const backdrop = document.getElementById("search-backdrop");
+  const closeBtn = document.getElementById("hero-search-close-btn");
+  const resultsDiv = document.getElementById("hero-search-results");
+  const activeIcon = searchBar.querySelector(".search-icon-active");
+  
+  if (!searchBar || !spotlightPlaceholder) return;
+  
+  isSpotlightActive = false;
+  
+  // Get placeholder position to morph back
+  const rect = spotlightPlaceholder.getBoundingClientRect();
+  
+  // Animate search bar back to original position
+  searchBar.style.transition = "top 0.4s cubic-bezier(0.16, 1, 0.3, 1), left 0.4s cubic-bezier(0.16, 1, 0.3, 1), width 0.4s cubic-bezier(0.16, 1, 0.3, 1), height 0.4s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.4s ease, border-color 0.4s ease, background-color 0.4s ease, border-radius 0.4s ease";
+  searchBar.style.top = `${rect.top}px`;
+  searchBar.style.left = `${rect.left}px`;
+  searchBar.style.width = `${rect.width}px`;
+  searchBar.style.height = `${rect.height}px`;
+  
+  searchBar.classList.remove("active-spotlight");
+  backdrop.classList.remove("active");
+  document.body.style.overflow = ""; // restore scrolling
+  
+  closeBtn.style.display = "none";
+  resultsDiv.style.display = "none";
+  if (activeIcon) activeIcon.style.display = "none";
+  
+  // Once transition completes, cleanup DOM changes and styles
+  setTimeout(() => {
+    if (spotlightPlaceholder && spotlightPlaceholder.parentNode) {
+      // Return the search bar to its original DOM layout slot before removing placeholder
+      spotlightPlaceholder.parentNode.insertBefore(searchBar, spotlightPlaceholder);
+      spotlightPlaceholder.parentNode.removeChild(spotlightPlaceholder);
+    }
+    spotlightPlaceholder = null;
+    
+    // Restore original static inline styles
+    searchBar.style.transition = "none";
+    searchBar.style.position = "";
+    searchBar.style.top = "";
+    searchBar.style.left = "";
+    searchBar.style.width = "";
+    searchBar.style.height = "";
+    searchBar.style.margin = "";
+    searchBar.style.zIndex = "";
+    
+    // Clear search results content
+    resultsDiv.innerHTML = "";
+  }, 400);
+}
+
+function renderSpotlightResults(query) {
+  const resultsContainer = document.getElementById("hero-search-results");
+  const mods = getMods();
+  if (!resultsContainer) return;
+
+  if (!query.trim()) {
+    const trending = [...mods].sort((a, b) => b.downloads - a.downloads).slice(0, 3);
+    resultsContainer.innerHTML = `
+      <div style="font-size:11px; font-weight:700; color:var(--text-muted); padding: 8px 16px 4px 16px; text-transform:uppercase; letter-spacing:0.5px;">Рекомендуемые проекты</div>
+    `;
+    trending.forEach(mod => {
+      resultsContainer.appendChild(createSpotlightResultItem(mod));
+    });
+    return;
+  }
+
+  const queryLC = query.toLowerCase();
+  const filtered = mods.filter(mod => 
+    mod.name.toLowerCase().includes(queryLC) ||
+    mod.shortDescription.toLowerCase().includes(queryLC) ||
+    mod.author.toLowerCase().includes(queryLC)
+  );
+
+  if (filtered.length === 0) {
+    resultsContainer.innerHTML = `
+      <div class="overlay-no-results">
+        <i class="fa-solid fa-magnifying-glass"></i>
+        <span>Ничего не найдено по запросу <strong>"${query}"</strong></span>
+      </div>
+    `;
+    return;
+  }
+
+  resultsContainer.innerHTML = "";
+  filtered.forEach(mod => {
+    resultsContainer.appendChild(createSpotlightResultItem(mod));
+  });
+}
+
+function createSpotlightResultItem(mod) {
+  const el = document.createElement("div");
+  el.className = "overlay-result-item";
+  
+  const loadersStr = mod.loaders.map(l => 
+    `<span class="result-tag" style="background: rgba(16, 185, 129, 0.08); color: var(--primary-color); font-size:10px; padding:1px 6px; margin-left:4px;">${METADATA.loaders[l] || l}</span>`
+  ).join("");
+
+  el.innerHTML = `
+    <div class="overlay-result-icon" style="background-color: ${mod.iconColor || '#10b981'}">
+      ${mod.avatar || '📦'}
+    </div>
+    <div class="overlay-result-info">
+      <div class="overlay-result-title-row">
+        <span class="overlay-result-title">${mod.name}</span>
+        <span class="overlay-result-badge">${METADATA.types[mod.type] || mod.type}</span>
+      </div>
+      <div class="overlay-result-desc">${mod.shortDescription}</div>
+    </div>
+    <div class="overlay-result-meta">
+      <span><i class="fa-solid fa-download"></i> ${formatNumber(mod.downloads)}</span>
+      <span>${loadersStr}</span>
+    </div>
+  `;
+
+  el.addEventListener("click", () => {
+    deactivateSpotlightSearch();
+    window.location.hash = `#/mod/${mod.slug || mod.id}`;
+  });
+
+  return el;
+}

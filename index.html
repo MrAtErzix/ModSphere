@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ModSphere — Платформа для модов Minecraft</title>
+  <!-- Google Fonts: Outfit and Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <!-- FontAwesome for icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Top Navigation Header -->
+  <header class="main-header">
+    <div class="header-container">
+      <a href="#/" class="logo">
+        <div class="logo-icon">M</div>
+        <span>ModSphere</span>
+      </a>
+      
+      <nav class="nav-links">
+        <a href="#/" class="nav-link active" id="nav-home"><i class="fa-solid fa-house"></i> Главная</a>
+        <a href="#/browse" class="nav-link" id="nav-browse"><i class="fa-solid fa-compass"></i> Обзор</a>
+        <a href="#/create" class="nav-link" id="nav-create"><i class="fa-solid fa-plus-circle"></i> Добавить мод</a>
+      </nav>
+
+      <div class="header-search-bar" id="header-search-container">
+        <i class="fa-solid fa-magnifying-glass search-icon"></i>
+        <input type="text" placeholder="Поиск модов, паков, плагинов..." id="header-search-input">
+      </div>
+
+      <div class="header-actions">
+        <button class="theme-toggle" id="theme-toggle" title="Переключить тему">
+          <i class="fa-solid fa-moon"></i>
+        </button>
+        <div class="user-profile">
+          <img src="https://api.dicebear.com/7.x/pixel-art/svg?seed=MinecraftCoder" alt="Аватар пользователя" class="user-avatar">
+          <span class="user-name">MineDev</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Notification Toast Container -->
+  <div id="toast-container"></div>
+
+  <!-- Main Content Area -->
+  <main class="content-wrapper" id="main-content">
+    <!-- Content will be injected here dynamically by app.js -->
+  </main>
+
+  <!-- Modal Gallery Lightbox -->
+  <div class="lightbox" id="gallery-lightbox">
+    <button class="lightbox-close"><i class="fa-solid fa-xmark"></i></button>
+    <img src="" alt="Детальный просмотр" class="lightbox-img">
+  </div>
+
+  <!-- Footer -->
+  <footer class="main-footer">
+    <div class="footer-container">
+      <div class="footer-info">
+        <div class="logo">
+          <div class="logo-icon">M</div>
+          <span>ModSphere</span>
+        </div>
+        <p>Современная, быстрая и открытая платформа для модификации вашей любимой игры. Создано с любовью к сообществу.</p>
+      </div>
+      <div class="footer-links-grid">
+        <div class="footer-links-col">
+          <h4>Ресурсы</h4>
+          <a href="#/browse?type=mod">Моды</a>
+          <a href="#/browse?type=modpack">Модпаки</a>
+          <a href="#/browse?type=resourcepack">Шейдеры и текстуры</a>
+          <a href="#/browse?type=plugin">Плагины</a>
+        </div>
+        <div class="footer-links-col">
+          <h4>Разработчикам</h4>
+          <a href="#/create">Загрузить проект</a>
+          <a href="https://github.com" target="_blank" rel="noopener">Документация API</a>
+          <a href="https://github.com" target="_blank" rel="noopener">Рекомендации</a>
+        </div>
+        <div class="footer-links-col">
+          <h4>Контакты</h4>
+          <a href="https://discord.gg" target="_blank" rel="noopener"><i class="fa-brands fa-discord"></i> Discord</a>
+          <a href="https://github.com" target="_blank" rel="noopener"><i class="fa-brands fa-github"></i> GitHub</a>
+          <a href="https://twitter.com" target="_blank" rel="noopener"><i class="fa-brands fa-twitter"></i> Twitter</a>
+        </div>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <p>&copy; 2026 ModSphere. Все права защищены. Minecraft является торговой маркой Mojang Synergies AB.</p>
+    </div>
+  </footer>
+
+  <!-- Spotlight Search Backdrop -->
+  <div class="search-backdrop" id="search-backdrop"></div>
+
+  <!-- Scripts -->
+  <script src="mods.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
