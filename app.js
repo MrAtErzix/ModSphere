@@ -51,12 +51,43 @@ const METADATA = {
   gameVersions: ["1.20.4", "1.20.2", "1.20.1", "1.19.4", "1.19.2", "1.18.2", "1.12.2"]
 };
 
+// Initialize User Database in LocalStorage
+function initUserDatabase() {
+  const DEFAULT_USERS = [
+    {
+      username: "MineDev",
+      email: "minedev.work@gmail.com",
+      password: "password123",
+      avatar: "https://api.dicebear.com/7.x/pixel-art/svg?seed=MineDev"
+    },
+    {
+      username: "Steve",
+      email: "steve@minecraft.net",
+      password: "stevepassword",
+      avatar: "https://api.dicebear.com/7.x/pixel-art/svg?seed=Steve"
+    },
+    {
+      username: "Alex",
+      email: "alex@minecraft.net",
+      password: "alexpassword",
+      avatar: "https://api.dicebear.com/7.x/pixel-art/svg?seed=Alex"
+    }
+  ];
+  if (!localStorage.getItem("registered_users")) {
+    localStorage.setItem("registered_users", JSON.stringify(DEFAULT_USERS));
+  }
+}
+
 // Initialize Application
 function initApp() {
+  initUserDatabase();
   setupTheme();
   setupRouting();
   setupGlobalEvents();
   setupSpotlightSearch();
+  renderUserAuth();
+  setupAuthModalEvents();
+  setupGoogleChooserEvents();
 }
 
 // --- THEME MANAGEMENT ---
@@ -134,7 +165,16 @@ function handleRoute() {
       window.location.hash = "#/";
     }
   } else if (path === "#/create") {
-    renderCreateForm();
+    const currentUser = localStorage.getItem("current_user");
+    if (!currentUser) {
+      showToast("Вам необходимо войти в аккаунт, чтобы опубликовать проект!", "info");
+      window.location.hash = "#/";
+      setTimeout(() => {
+        openAuthModal();
+      }, 500);
+    } else {
+      renderCreateForm();
+    }
   } else {
     // Default fallback
     window.location.hash = "#/";
@@ -226,10 +266,10 @@ function renderHome() {
   const container = document.getElementById("main-content");
   const mods = getMods();
   
-  // Calculate aggregate stats
+  // Calculate aggregate stats (100% real numbers from mods database!)
   const totalDownloads = mods.reduce((sum, m) => sum + m.downloads, 0);
   const totalMods = mods.length;
-  const totalAuthors = new Set(mods.map(m => m.author)).size + 3; // mock extra creators
+  const totalAuthors = new Set(mods.map(m => m.author)).size;
   
   // Take top 6 mods by downloads
   const trendingMods = [...mods]
@@ -267,15 +307,15 @@ function renderHome() {
     <!-- Platform Stats -->
     <section class="stats-banner">
       <div class="stat-item">
-        <span class="stat-num" id="stat-downloads">${formatNumberFull(totalDownloads)}</span>
+        <span class="stat-num" id="stat-downloads">0</span>
         <span class="stat-label">Скачиваний</span>
       </div>
       <div class="stat-item">
-        <span class="stat-num" id="stat-mods">${totalMods}</span>
+        <span class="stat-num" id="stat-mods">0</span>
         <span class="stat-label">Проектов в сети</span>
       </div>
       <div class="stat-item">
-        <span class="stat-num" id="stat-authors">${totalAuthors}</span>
+        <span class="stat-num" id="stat-authors">0</span>
         <span class="stat-label">Создателей</span>
       </div>
     </section>
@@ -344,6 +384,40 @@ function renderHome() {
       window.location.hash = `#/browse?categories=${encodeURIComponent(cat)}`;
     });
   });
+
+  // Trigger count-up animation for stats banner numbers!
+  animateCountUp("stat-downloads", totalDownloads, true);
+  animateCountUp("stat-mods", totalMods, false);
+  animateCountUp("stat-authors", totalAuthors, false);
+}
+
+// Smooth Count Up Animation for Statistics
+function animateCountUp(elementId, targetVal, isFormatted = false) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  
+  let start = 0;
+  const duration = 1200; // milliseconds
+  const startTime = performance.now();
+  
+  function update(currentTime) {
+    const elapsed = currentTime - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    
+    // Easing out quadratic function
+    const easeProgress = progress * (2 - progress);
+    const currentVal = Math.floor(easeProgress * targetVal);
+    
+    el.textContent = isFormatted ? formatNumberFull(currentVal) : currentVal;
+    
+    if (progress < 1) {
+      requestAnimationFrame(update);
+    } else {
+      el.textContent = isFormatted ? formatNumberFull(targetVal) : targetVal;
+    }
+  }
+  
+  requestAnimationFrame(update);
 }
 
 // Card Renderer Helper
@@ -361,7 +435,7 @@ function createModCard(mod) {
   card.innerHTML = `
     <div class="mod-card-header">
       <div class="mod-card-icon" style="background-color: ${mod.iconColor || '#10b981'}">
-        ${mod.avatar || '📦'}
+        ${renderAvatar(mod.avatar)}
       </div>
       <div class="mod-card-details">
         <h3 class="mod-card-title">${mod.name}</h3>
@@ -655,7 +729,7 @@ function renderBrowseResults() {
 
     item.innerHTML = `
       <div class="result-icon" style="background-color: ${mod.iconColor || '#10b981'}">
-        ${mod.avatar || '📦'}
+        ${renderAvatar(mod.avatar)}
       </div>
       <div class="result-info">
         <div class="result-title-row">
@@ -690,7 +764,7 @@ function renderModDetails(mod) {
     <!-- Header -->
     <div class="mod-detail-header">
       <div class="mod-detail-icon" style="background-color: ${mod.iconColor || '#10b981'}">
-        ${mod.avatar || '📦'}
+        ${renderAvatar(mod.avatar)}
       </div>
       <div class="mod-detail-meta">
         <div class="mod-detail-title-row">
@@ -984,6 +1058,20 @@ function renderCreateForm() {
   
   const emojis = ["📦", "⚙️", "⚡", "👁️", "🏔️", "✨", "🐉", "📖", "🔨", "🧩", "🧪", "🚀"];
   const colors = ["#10b981", "#a855f7", "#f59e0b", "#ef4444", "#dc2626", "#3b82f6", "#06b6d4", "#ec4899", "#8b5cf6"];
+  const presetIcons = [
+    { name: "Sodium", url: "https://cdn.modrinth.com/data/A5R1o1Zd/icon.png" },
+    { name: "Iris", url: "https://cdn.modrinth.com/data/ylSubb7E/icon.png" },
+    { name: "Create", url: "https://cdn.modrinth.com/data/Cod6t3nd/icon.png" },
+    { name: "JEI", url: "https://cdn.modrinth.com/data/u6th5mrr/icon.png" },
+    { name: "RLCraft", url: "https://media.forgecdn.net/avatars/223/452/637042571217730386.png" },
+    { name: "Distant Horizons", url: "https://cdn.modrinth.com/data/P7dR8mSH/icon.png" },
+    { name: "Complementary Shaders", url: "https://cdn.modrinth.com/data/gC9AV25h/icon.png" },
+    { name: "OptiFine", url: "https://media.forgecdn.net/avatars/76/906/636142171120286786.png" },
+    { name: "WorldEdit", url: "https://cdn.modrinth.com/data/1uN2V5oT/icon.png" },
+    { name: "Xaero's Minimap", url: "https://cdn.modrinth.com/data/148tUzUi/icon.png" },
+    { name: "Alex's Mobs", url: "https://cdn.modrinth.com/data/89vL1y4z/icon.png" },
+    { name: "AppleSkin", url: "https://cdn.modrinth.com/data/EsAf2P5H/icon.png" }
+  ];
 
   container.innerHTML = `
     <div class="form-panel">
@@ -1024,21 +1112,44 @@ function renderCreateForm() {
 
           <!-- Avatar / Logo Customizer -->
           <div class="form-group full-width">
-            <label class="form-label">Настройка иконки проекта</label>
+            <label class="form-label">Иконка проекта *</label>
             <div class="avatar-picker">
               <div class="avatar-preview" id="form-avatar-preview" style="background-color: ${selectedColor}">
                 ${selectedEmoji}
               </div>
-              <div class="avatar-inputs">
-                <div class="form-label" style="font-size: 12px; color: var(--text-secondary);">Выберите символ:</div>
-                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                  ${emojis.map(e => `<span class="emoji-choice" style="cursor:pointer; font-size: 20px; padding: 4px; border-radius:4px;" data-emoji="${e}">${e}</span>`).join("")}
+              <div class="avatar-inputs" style="display:flex; flex-direction:column; gap:12px;">
+                <div class="form-group" style="margin: 0; padding: 0;">
+                  <div class="form-label" style="font-size: 12px; color: var(--text-secondary);">Загрузить свою иконку (PNG/JPG):</div>
+                  <input type="file" id="form-icon-file" accept="image/*" class="form-input" style="padding: 6px 12px; font-size:12px; max-width: 320px;">
                 </div>
-                <div class="form-label" style="font-size: 12px; color: var(--text-secondary); margin-top: 6px;">Выберите цвет фона:</div>
-                <div class="avatar-color-choices">
-                  ${colors.map(c => `
-                    <div class="color-dot ${c === selectedColor ? 'selected' : ''}" style="background-color: ${c}" data-color="${c}"></div>
-                  `).join("")}
+                
+                <div class="form-group" style="margin: 4px 0 0 0; padding: 0;">
+                  <div class="form-label" style="font-size: 12px; color: var(--text-secondary);">ИЛИ выберите оригинальную / готовую иконку:</div>
+                  <div class="preset-icons-grid">
+                    ${presetIcons.map(p => `
+                      <div class="preset-icon-item" title="${p.name}" data-url="${p.url}">
+                        <img src="${p.url}" alt="${p.name}">
+                      </div>
+                    `).join("")}
+                  </div>
+                </div>
+
+                <div class="auth-divider" style="margin: 8px 0; font-size:11px;"><span>ИЛИ создать в конструкторе</span></div>
+
+                <div class="form-group" style="margin: 0; padding: 0;">
+                  <div class="form-label" style="font-size: 12px; color: var(--text-secondary);">Выберите символ:</div>
+                  <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    ${emojis.map(e => `<span class="emoji-choice" style="cursor:pointer; font-size: 20px; padding: 4px; border-radius:4px;" data-emoji="${e}">${e}</span>`).join("")}
+                  </div>
+                </div>
+                
+                <div class="form-group" style="margin: 0; padding: 0;">
+                  <div class="form-label" style="font-size: 12px; color: var(--text-secondary);">Выберите цвет фона:</div>
+                  <div class="avatar-color-choices">
+                    ${colors.map(c => `
+                      <div class="color-dot ${c === selectedColor ? 'selected' : ''}" style="background-color: ${c}" data-color="${c}"></div>
+                    `).join("")}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1120,12 +1231,48 @@ function renderCreateForm() {
   // --- INTERACTIVE EVENTS ---
 
   const previewEl = document.getElementById("form-avatar-preview");
-  
+  const fileInput = document.getElementById("form-icon-file");
+  let uploadedAvatarData = null;
+
+  // File Upload handling
+  fileInput.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (file.size > 2 * 1024 * 1024) { // limit 2MB
+        showToast("Размер файла не должен превышать 2 МБ!", "info");
+        fileInput.value = "";
+        return;
+      }
+      document.querySelectorAll(".preset-icon-item").forEach(i => i.classList.remove("selected"));
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        uploadedAvatarData = event.target.result;
+        previewEl.innerHTML = `<img src="${uploadedAvatarData}" style="width:100%; height:100%; object-fit:cover; border-radius:inherit;">`;
+      };
+      reader.readAsDataURL(file);
+    }
+  });
+
+  // Preset icon choices
+  document.querySelectorAll(".preset-icon-item").forEach(item => {
+    item.addEventListener("click", () => {
+      document.querySelectorAll(".preset-icon-item").forEach(i => i.classList.remove("selected"));
+      item.classList.add("selected");
+      uploadedAvatarData = item.getAttribute("data-url");
+      fileInput.value = ""; // Clear file input
+      previewEl.innerHTML = `<img src="${uploadedAvatarData}" style="width:100%; height:100%; object-fit:cover; border-radius:inherit;">`;
+    });
+  });
+
   // Custom Emoji choices
   document.querySelectorAll(".emoji-choice").forEach(choice => {
     choice.addEventListener("click", () => {
+      document.querySelectorAll(".preset-icon-item").forEach(i => i.classList.remove("selected"));
       selectedEmoji = choice.getAttribute("data-emoji");
+      uploadedAvatarData = null; // Reset file/preset upload
+      fileInput.value = ""; // Clear file input
       previewEl.textContent = selectedEmoji;
+      previewEl.style.backgroundColor = selectedColor;
     });
   });
 
@@ -1135,7 +1282,9 @@ function renderCreateForm() {
       document.querySelectorAll(".color-dot").forEach(d => d.classList.remove("selected"));
       dot.classList.add("selected");
       selectedColor = dot.getAttribute("data-color");
-      previewEl.style.backgroundColor = selectedColor;
+      if (!uploadedAvatarData || (!uploadedAvatarData.startsWith('http') && !uploadedAvatarData.startsWith('data:image'))) {
+        previewEl.style.backgroundColor = selectedColor;
+      }
     });
   });
 
@@ -1173,12 +1322,15 @@ function renderCreateForm() {
       return;
     }
 
+    const currentUser = JSON.parse(localStorage.getItem("current_user"));
+    const authorName = currentUser ? currentUser.username : "MineDev";
+
     const newMod = {
-      id: slug, // use slug as unique ID
+      id: slug,
       name,
       slug,
-      author: "MineDev", // Current mock username
-      avatar: selectedEmoji,
+      author: authorName,
+      avatar: uploadedAvatarData || selectedEmoji,
       iconColor: selectedColor,
       shortDescription: shortDesc,
       description: desc,
@@ -1194,21 +1346,15 @@ function renderCreateForm() {
       gallery: [],
     };
 
-    // Save
     saveMod(newMod);
     showToast("Проект успешно опубликован!", "success");
 
-    // Redirect to detail page
     setTimeout(() => {
       window.location.hash = `#/mod/${slug}`;
     }, 800);
   });
 }
 
-
-// --- UTILITIES ---
-
-// Date Formatter helper
 function formatDate(dateString) {
   if (!dateString) return "Неизвестно";
   const date = new Date(dateString);
@@ -1216,7 +1362,6 @@ function formatDate(dateString) {
   return date.toLocaleDateString('ru-RU', options);
 }
 
-// Number Formatter (compact format: 14.5M, 12.3k)
 function formatNumber(num) {
   if (num >= 1000000) {
     return (num / 1000000).toFixed(1).replace(".0", "") + "M";
@@ -1227,12 +1372,10 @@ function formatNumber(num) {
   return num.toString();
 }
 
-// Full Number formatter (comma separated: 14 502 034)
 function formatNumberFull(num) {
   return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 }
 
-// Toast message notifications
 function showToast(message, type = "success") {
   const container = document.getElementById("toast-container");
   const toast = document.createElement("div");
@@ -1245,7 +1388,6 @@ function showToast(message, type = "success") {
   toast.innerHTML = `${icon} <span>${message}</span>`;
   container.appendChild(toast);
   
-  // Slide out and remove
   setTimeout(() => {
     toast.classList.add("fade-out");
     toast.addEventListener("animationend", () => {
@@ -1254,18 +1396,317 @@ function showToast(message, type = "success") {
   }, 3000);
 }
 
-// --- SPOTLIGHT SEARCH LOGIC ---
+function renderUserAuth() {
+  const wrapper = document.getElementById("user-auth-wrapper");
+  if (!wrapper) return;
+
+  const currentUser = JSON.parse(localStorage.getItem("current_user"));
+
+  if (currentUser) {
+    wrapper.innerHTML = `
+      <div class="user-profile" id="header-user-profile">
+        <img src="${currentUser.avatar || 'https://api.dicebear.com/7.x/pixel-art/svg?seed=' + currentUser.username}" alt="Аватар" class="user-avatar">
+        <span class="user-name">${currentUser.username}</span>
+        <i class="fa-solid fa-chevron-down" style="font-size: 10px; margin-left: 4px; color: var(--text-secondary);"></i>
+      </div>
+      <div class="user-menu-dropdown" id="user-menu-dropdown">
+        <div class="user-menu-info">
+          <div class="user-menu-info-name">${currentUser.username}</div>
+          <div class="user-menu-info-email">${currentUser.email}</div>
+        </div>
+        <div class="user-menu-divider"></div>
+        <button class="user-menu-item" id="user-menu-my-projects"><i class="fa-solid fa-folder"></i> Мои проекты</button>
+        <div class="user-menu-divider"></div>
+        <button class="user-menu-item" id="user-menu-logout" style="color: #ef4444;"><i class="fa-solid fa-right-from-bracket"></i> Выйти</button>
+      </div>
+    `;
+
+    const profileBtn = document.getElementById("header-user-profile");
+    const dropdown = document.getElementById("user-menu-dropdown");
+
+    profileBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      dropdown.classList.toggle("active");
+    });
+
+    document.addEventListener("click", () => {
+      dropdown.classList.remove("active");
+    });
+
+    document.getElementById("user-menu-my-projects").addEventListener("click", () => {
+      window.location.hash = `#/browse?q=${encodeURIComponent(currentUser.username)}`;
+    });
+
+    document.getElementById("user-menu-logout").addEventListener("click", () => {
+      localStorage.removeItem("current_user");
+      showToast("Вы успешно вышли из аккаунта", "info");
+      renderUserAuth();
+      if (window.location.hash === "#/create") {
+        window.location.hash = "#/";
+      }
+    });
+
+  } else {
+    wrapper.innerHTML = `
+      <button class="btn btn-secondary btn-sm" id="header-login-btn" style="padding: 6px 16px;">
+        <i class="fa-solid fa-right-to-bracket"></i> Войти
+      </button>
+    `;
+
+    document.getElementById("header-login-btn").addEventListener("click", openAuthModal);
+  }
+}
+
+function openAuthModal() {
+  const modal = document.getElementById("auth-modal");
+  modal.classList.add("active");
+  document.getElementById("login-email").focus();
+}
+
+function closeAuthModal() {
+  const modal = document.getElementById("auth-modal");
+  modal.classList.remove("active");
+  document.getElementById("login-form").reset();
+  document.getElementById("register-form").reset();
+}
+
+function setupAuthModalEvents() {
+  const backdrop = document.getElementById("auth-modal-backdrop");
+  const closeBtn = document.getElementById("auth-modal-close-btn");
+  const tabLogin = document.getElementById("tab-login-btn");
+  const tabRegister = document.getElementById("tab-register-btn");
+  const loginForm = document.getElementById("login-form");
+  const registerForm = document.getElementById("register-form");
+  const googleBtn = document.getElementById("btn-google-login");
+
+  backdrop.addEventListener("click", closeAuthModal);
+  closeBtn.addEventListener("click", closeAuthModal);
+
+  tabLogin.addEventListener("click", () => {
+    tabLogin.classList.add("active");
+    tabRegister.classList.remove("active");
+    loginForm.style.display = "block";
+    registerForm.style.display = "none";
+  });
+
+  tabRegister.addEventListener("click", () => {
+    tabRegister.classList.add("active");
+    tabLogin.classList.remove("active");
+    registerForm.style.display = "block";
+    loginForm.style.display = "none";
+  });
+
+  loginForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const email = document.getElementById("login-email").value.trim();
+    const password = document.getElementById("login-password").value;
+    
+    const users = JSON.parse(localStorage.getItem("registered_users") || "[]");
+    const user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+    
+    if (!user) {
+      showToast("Пользователь с такой почтой не найден!", "info");
+      return;
+    }
+    
+    if (user.password !== password) {
+      showToast("Неверный пароль!", "info");
+      return;
+    }
+    
+    localStorage.setItem("current_user", JSON.stringify(user));
+    showToast(`Рады видеть вас снова, ${user.username}!`, "success");
+    closeAuthModal();
+    renderUserAuth();
+  });
+
+  registerForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const username = document.getElementById("register-username").value.trim();
+    const email = document.getElementById("register-email").value.trim();
+    const password = document.getElementById("register-password").value;
+    
+    const users = JSON.parse(localStorage.getItem("registered_users") || "[]");
+    const exists = users.some(u => u.email.toLowerCase() === email.toLowerCase());
+    
+    if (exists) {
+      showToast("Пользователь с такой почтой уже зарегистрирован!", "info");
+      return;
+    }
+
+    const user = {
+      username: username,
+      email: email,
+      password: password,
+      avatar: `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(username)}`
+    };
+
+    users.push(user);
+    localStorage.setItem("registered_users", JSON.stringify(users));
+    localStorage.setItem("current_user", JSON.stringify(user));
+    
+    showToast(`Аккаунт успешно создан! Добро пожаловать, ${username}!`, "success");
+    closeAuthModal();
+    renderUserAuth();
+  });
+
+  googleBtn.addEventListener("click", () => {
+    openGoogleModal();
+  });
+}
+
+function openGoogleModal() {
+  const googleModal = document.getElementById("google-modal");
+  googleModal.classList.add("active");
+  
+  const accountsList = document.getElementById("google-accounts-list");
+  const accounts = [
+    { name: "MineDev Coder", email: "minedev.work@gmail.com", avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=minedev" },
+    { name: "Steve Builder", email: "steve.builder@gmail.com", avatar: "https://api.dicebear.com/7.x/pixel-art/svg?seed=steve" },
+    { name: "Alex Explorer", email: "alex.explorer@gmail.com", avatar: "https://api.dicebear.com/7.x/pixel-art/svg?seed=alex" }
+  ];
+  
+  let html = accounts.map((acc, index) => `
+    <div class="google-account-item" data-index="${index}">
+      <img src="${acc.avatar}" alt="Avatar" class="google-account-avatar">
+      <div class="google-account-info">
+        <div class="google-account-name">${acc.name}</div>
+        <div class="google-account-email">${acc.email}</div>
+      </div>
+      <i class="fa-solid fa-chevron-right" style="color: #70757a; font-size:10px;"></i>
+    </div>
+  `).join("");
+  
+  html += `
+    <div class="google-account-item" id="google-use-another-btn">
+      <div class="google-account-avatar" style="display:flex; align-items:center; justify-content:center; background:#f1f3f4; color:#5f6368;">
+        <i class="fa-solid fa-user-plus" style="font-size:14px;"></i>
+      </div>
+      <div class="google-account-info">
+        <div class="google-account-name" style="color:#1a73e8;">Использовать другой аккаунт</div>
+      </div>
+    </div>
+  `;
+  
+  accountsList.innerHTML = html;
+  document.getElementById("google-custom-account-form").style.display = "none";
+  accountsList.style.display = "flex";
+  
+  const items = accountsList.querySelectorAll(".google-account-item");
+  items.forEach(item => {
+    item.addEventListener("click", () => {
+      if (item.id === "google-use-another-btn") {
+        accountsList.style.display = "none";
+        document.getElementById("google-custom-account-form").style.display = "block";
+        document.getElementById("google-custom-name").focus();
+        return;
+      }
+      
+      const idx = item.getAttribute("data-index");
+      const selectedAcc = accounts[idx];
+      loginWithGoogleAccount(selectedAcc);
+    });
+  });
+}
+
+function loginWithGoogleAccount(account) {
+  const card = document.querySelector(".google-modal-card");
+  const originalHtml = card.innerHTML;
+  
+  card.innerHTML = `
+    <div style="padding: 40px 0; text-align: center;">
+      <i class="fa-solid fa-spinner fa-spin" style="font-size: 48px; color: #1a73e8; margin-bottom: 24px;"></i>
+      <h3 style="font-size: 18px; margin-bottom: 8px; color: #202124;">Вход в аккаунт...</h3>
+      <p style="font-size: 14px; color: #5f6368;">Связываем ваш Google профиль с ModSphere</p>
+    </div>
+  `;
+  
+  setTimeout(() => {
+    const users = JSON.parse(localStorage.getItem("registered_users") || "[]");
+    const exists = users.some(u => u.email.toLowerCase() === account.email.toLowerCase());
+    
+    const username = account.name.replace(/\s+/g, "");
+    const userObj = {
+      username: username,
+      email: account.email,
+      avatar: account.avatar
+    };
+    
+    if (!exists) {
+      users.push(userObj);
+      localStorage.setItem("registered_users", JSON.stringify(users));
+    }
+    
+    localStorage.setItem("current_user", JSON.stringify(userObj));
+    
+    closeGoogleModal();
+    closeAuthModal();
+    renderUserAuth();
+    
+    showToast(`Вход через Google успешно выполнен! Добро пожаловать, ${username}!`, "success");
+    
+    card.innerHTML = originalHtml;
+  }, 1500);
+}
+
+function closeGoogleModal() {
+  document.getElementById("google-modal").classList.remove("active");
+}
+
+function setupGoogleChooserEvents() {
+  const googleModalBackdrop = document.getElementById("google-modal-backdrop");
+  const googleModalCloseBtn = document.getElementById("google-modal-close-btn");
+  const customCancel = document.getElementById("btn-google-custom-cancel");
+  const customSubmit = document.getElementById("btn-google-custom-submit");
+  
+  googleModalBackdrop.addEventListener("click", closeGoogleModal);
+  googleModalCloseBtn.addEventListener("click", closeGoogleModal);
+  
+  customCancel.addEventListener("click", () => {
+    document.getElementById("google-custom-account-form").style.display = "none";
+    document.getElementById("google-accounts-list").style.display = "flex";
+  });
+  
+  customSubmit.addEventListener("click", () => {
+    const name = document.getElementById("google-custom-name").value.trim();
+    const email = document.getElementById("google-custom-email").value.trim();
+    
+    if (!name || !email) {
+      showToast("Заполните все поля!", "info");
+      return;
+    }
+    if (!email.includes("@")) {
+      showToast("Введите корректный email!", "info");
+      return;
+    }
+    
+    const customAcc = {
+      name: name,
+      email: email,
+      avatar: `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(name)}`
+    };
+    
+    loginWithGoogleAccount(customAcc);
+  });
+}
+
+function renderAvatar(avatar) {
+  if (!avatar) return '📦';
+  if (avatar.startsWith('http') || avatar.startsWith('data:image')) {
+    return `<img src="${avatar}" alt="Иконка мода">`;
+  }
+  return avatar;
+}
+
 function setupSpotlightSearch() {
   const backdrop = document.getElementById("search-backdrop");
   backdrop.addEventListener("click", deactivateSpotlightSearch);
 
-  // Global key bindings (Escape to close, Ctrl+K or Cmd+K to open)
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && isSpotlightActive) {
       deactivateSpotlightSearch();
     }
     
-    // Trigger search overlay using Ctrl+K / Cmd+K
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
       e.preventDefault();
       const heroInput = document.getElementById("hero-search-input");
@@ -1293,10 +1734,8 @@ function activateSpotlightSearch() {
   
   isSpotlightActive = true;
   
-  // 1. Get original coordinates
   const rect = searchBar.getBoundingClientRect();
   
-  // 2. Insert placeholder into the layout to prevent content jumping
   spotlightPlaceholder = document.createElement("div");
   spotlightPlaceholder.className = "hero-search-placeholder";
   spotlightPlaceholder.style.height = `${rect.height}px`;
@@ -1305,10 +1744,8 @@ function activateSpotlightSearch() {
   spotlightPlaceholder.style.margin = computedStyle.margin;
   searchBar.parentNode.insertBefore(spotlightPlaceholder, searchBar);
   
-  // Move searchBar to body level so it renders on top of the backdrop, bypassing blurred parent stacking contexts
   document.body.appendChild(searchBar);
   
-  // 3. Pin search bar to fixed screen coordinates (no transition)
   searchBar.style.transition = "none";
   searchBar.style.position = "fixed";
   searchBar.style.top = `${rect.top}px`;
@@ -1318,14 +1755,11 @@ function activateSpotlightSearch() {
   searchBar.style.margin = "0";
   searchBar.style.zIndex = "2000";
   
-  // 4. Activate backdrop overlay and block body scroll
   backdrop.classList.add("active");
   document.body.style.overflow = "hidden";
   
-  // 5. Force browser reflow to apply the fixed position
   searchBar.offsetHeight;
   
-  // 6. Set transitions and animate to spotlight target position
   searchBar.style.transition = "";
   searchBar.classList.add("active-spotlight");
   
@@ -1337,15 +1771,12 @@ function activateSpotlightSearch() {
   searchBar.style.width = `${targetWidth}px`;
   searchBar.style.height = "auto";
   
-  // Show active search elements
   closeBtn.style.display = "flex";
   resultsDiv.style.display = "flex";
   if (activeIcon) activeIcon.style.display = "block";
   
-  // Populate suggestions
   renderSpotlightResults(input.value);
   
-  // Focus the input inside the active search bar
   setTimeout(() => {
     input.focus();
   }, 100);
@@ -1364,10 +1795,8 @@ function deactivateSpotlightSearch() {
   
   isSpotlightActive = false;
   
-  // Get placeholder position to morph back
   const rect = spotlightPlaceholder.getBoundingClientRect();
   
-  // Animate search bar back to original position
   searchBar.style.transition = "top 0.4s cubic-bezier(0.16, 1, 0.3, 1), left 0.4s cubic-bezier(0.16, 1, 0.3, 1), width 0.4s cubic-bezier(0.16, 1, 0.3, 1), height 0.4s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.4s ease, border-color 0.4s ease, background-color 0.4s ease, border-radius 0.4s ease";
   searchBar.style.top = `${rect.top}px`;
   searchBar.style.left = `${rect.left}px`;
@@ -1376,22 +1805,19 @@ function deactivateSpotlightSearch() {
   
   searchBar.classList.remove("active-spotlight");
   backdrop.classList.remove("active");
-  document.body.style.overflow = ""; // restore scrolling
+  document.body.style.overflow = "";
   
   closeBtn.style.display = "none";
   resultsDiv.style.display = "none";
   if (activeIcon) activeIcon.style.display = "none";
   
-  // Once transition completes, cleanup DOM changes and styles
   setTimeout(() => {
     if (spotlightPlaceholder && spotlightPlaceholder.parentNode) {
-      // Return the search bar to its original DOM layout slot before removing placeholder
       spotlightPlaceholder.parentNode.insertBefore(searchBar, spotlightPlaceholder);
       spotlightPlaceholder.parentNode.removeChild(spotlightPlaceholder);
     }
     spotlightPlaceholder = null;
     
-    // Restore original static inline styles
     searchBar.style.transition = "none";
     searchBar.style.position = "";
     searchBar.style.top = "";
@@ -1401,7 +1827,6 @@ function deactivateSpotlightSearch() {
     searchBar.style.margin = "";
     searchBar.style.zIndex = "";
     
-    // Clear search results content
     resultsDiv.innerHTML = "";
   }, 400);
 }
@@ -1455,7 +1880,7 @@ function createSpotlightResultItem(mod) {
 
   el.innerHTML = `
     <div class="overlay-result-icon" style="background-color: ${mod.iconColor || '#10b981'}">
-      ${mod.avatar || '📦'}
+      ${renderAvatar(mod.avatar)}
     </div>
     <div class="overlay-result-info">
       <div class="overlay-result-title-row">

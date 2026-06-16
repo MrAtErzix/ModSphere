@@ -5,7 +5,7 @@ const INITIAL_MODS = [
     name: "Sodium",
     slug: "sodium",
     author: "JellySquid",
-    avatar: "⚡",
+    avatar: "https://cdn.modrinth.com/data/A5R1o1Zd/icon.png",
     iconColor: "#10b981",
     shortDescription: "A modern rendering engine for Minecraft which greatly improves frame rates and fixes micro-stutter.",
     description: `
@@ -82,7 +82,7 @@ const INITIAL_MODS = [
     name: "Iris Shaders",
     slug: "iris",
     author: "CoderBot",
-    avatar: "👁️",
+    avatar: "https://cdn.modrinth.com/data/ylSubb7E/icon.png",
     iconColor: "#a855f7",
     shortDescription: "A modern shaders mod for Minecraft designed to be compatible with existing OptiFine shader packs.",
     description: `
@@ -144,7 +144,7 @@ const INITIAL_MODS = [
     name: "Create",
     slug: "create",
     author: "simibubi",
-    avatar: "⚙️",
+    avatar: "https://cdn.modrinth.com/data/Cod6t3nd/icon.png",
     iconColor: "#f59e0b",
     shortDescription: "A rich aesthetic mod offering a variety of tools and blocks for Building, Decoration and Aesthetic Automation.",
     description: `
@@ -204,7 +204,7 @@ const INITIAL_MODS = [
     name: "Just Enough Items (JEI)",
     slug: "jei",
     author: "mezz",
-    avatar: "📖",
+    avatar: "https://cdn.modrinth.com/data/u6th5mrr/icon.png",
     iconColor: "#ef4444",
     shortDescription: "An item and recipe viewing mod for Minecraft, built from the ground up for stability and performance.",
     description: `
@@ -263,7 +263,7 @@ const INITIAL_MODS = [
     name: "RLCraft",
     slug: "rlcraft",
     author: "Shivaxi",
-    avatar: "🐉",
+    avatar: "https://media.forgecdn.net/avatars/223/452/637042571217730386.png",
     iconColor: "#dc2626",
     shortDescription: "Real Life or Realism Craft, currently the hardest modpack in Minecraft. Survival, RPG elements, and dungeons.",
     description: `
@@ -311,7 +311,7 @@ const INITIAL_MODS = [
     name: "Distant Horizons",
     slug: "distant-horizons",
     author: "James_Shaw",
-    avatar: "🏔️",
+    avatar: "https://cdn.modrinth.com/data/P7dR8mSH/icon.png",
     iconColor: "#3b82f6",
     shortDescription: "A Level of Detail (LOD) mod that draws simplified terrain past Minecraft's standard render distance.",
     description: `
@@ -352,7 +352,7 @@ const INITIAL_MODS = [
     name: "Complementary Shaders - Reimagined",
     slug: "complementary-reimagined",
     author: "EminGT",
-    avatar: "✨",
+    avatar: "https://cdn.modrinth.com/data/gC9AV25h/icon.png",
     iconColor: "#06b6d4",
     shortDescription: "A shader pack that aims for visual perfection, performance, and preservation of Minecraft's original style.",
     description: `
@@ -397,11 +397,15 @@ const INITIAL_MODS = [
   }
 ];
 
+const DB_VERSION = "v2";
+
 // Helper to load/save custom mods from LocalStorage so the user can interactively create new ones
 function getMods() {
   const stored = localStorage.getItem("mods_data");
-  if (!stored) {
+  const ver = localStorage.getItem("mods_db_version");
+  if (!stored || ver !== DB_VERSION) {
     localStorage.setItem("mods_data", JSON.stringify(INITIAL_MODS));
+    localStorage.setItem("mods_db_version", DB_VERSION);
     return INITIAL_MODS;
   }
   try {
