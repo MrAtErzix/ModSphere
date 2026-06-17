@@ -91,9 +91,51 @@ function initUserDatabase() {
   }
 }
 
+let syncPushTimeout = null;
+async function syncPush() {
+  try {
+    const mods = JSON.parse(localStorage.getItem("mods_data") || "[]");
+    const users = JSON.parse(localStorage.getItem("registered_users") || "[]");
+    await fetch("/api/sync", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ mods, users })
+    });
+  } catch(e) {
+    console.log("Local sync push failed (expected if on static host):", e);
+  }
+}
+
+// Intercept LocalStorage to auto-sync to backend
+const originalSetItem = localStorage.setItem;
+localStorage.setItem = function(key, value) {
+  originalSetItem.apply(this, arguments);
+  if (key === "mods_data" || key === "registered_users") {
+    if (syncPushTimeout) clearTimeout(syncPushTimeout);
+    syncPushTimeout = setTimeout(syncPush, 500);
+  }
+};
+
 // Initialize Application
-function initApp() {
+async function initApp() {
   initUserDatabase();
+  
+  // Try to pull data from backend
+  try {
+    const res = await fetch("/api/sync");
+    if (res.ok) {
+      const data = await res.json();
+      if (data.mods && data.mods.length > 0) {
+        originalSetItem.call(localStorage, "mods_data", JSON.stringify(data.mods));
+      }
+      if (data.users && data.users.length > 0) {
+        originalSetItem.call(localStorage, "registered_users", JSON.stringify(data.users));
+      }
+    }
+  } catch(e) {
+    console.log("Local sync pull failed (expected if on static host):", e);
+  }
+
   setupTheme();
   setupRouting();
   setupGlobalEvents();
