@@ -1771,12 +1771,9 @@ function closeAuthModal() {
   const tabLogin = document.getElementById("tab-login-btn");
   const tabRegister = document.getElementById("tab-register-btn");
   const divider = document.querySelector(".auth-modal-card .auth-divider");
-  const googleBtn = document.getElementById("btn-google-login");
-  
   if (tabLogin) tabLogin.style.display = "block";
   if (tabRegister) tabRegister.style.display = "block";
   if (divider) divider.style.display = "flex";
-  if (googleBtn) googleBtn.style.display = "flex";
 }
 
 function setupAuthModalEvents() {
@@ -1786,7 +1783,6 @@ function setupAuthModalEvents() {
   const tabRegister = document.getElementById("tab-register-btn");
   const loginForm = document.getElementById("login-form");
   const registerForm = document.getElementById("register-form");
-  const googleBtn = document.getElementById("btn-google-login");
 
   backdrop.addEventListener("click", closeAuthModal);
   closeBtn.addEventListener("click", closeAuthModal);
@@ -1837,9 +1833,6 @@ function setupAuthModalEvents() {
     handleRegisterFormSubmit(e);
   });
 
-  googleBtn.addEventListener("click", () => {
-    openGoogleModal();
-  });
 }
 
 function openGoogleModal() {
@@ -2958,13 +2951,11 @@ function showVerificationStep(tempUser, verificationCode) {
   const tabLogin = document.getElementById("tab-login-btn");
   const tabRegister = document.getElementById("tab-register-btn");
   const divider = document.querySelector(".auth-modal-card .auth-divider");
-  const googleBtn = document.getElementById("btn-google-login");
 
-  // Hide tabs and Google login buttons during verification to keep user focused
+  // Hide tabs during verification to keep user focused
   if (tabLogin) tabLogin.style.display = "none";
   if (tabRegister) tabRegister.style.display = "none";
   if (divider) divider.style.display = "none";
-  if (googleBtn) googleBtn.style.display = "none";
 
   registerForm.innerHTML = `
     <div style="text-align: center; margin-bottom: 20px;">
@@ -2990,7 +2981,6 @@ function showVerificationStep(tempUser, verificationCode) {
     if (tabLogin) tabLogin.style.display = "block";
     if (tabRegister) tabRegister.style.display = "block";
     if (divider) divider.style.display = "flex";
-    if (googleBtn) googleBtn.style.display = "flex";
   });
 
   // Handle code submission
