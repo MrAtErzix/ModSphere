@@ -197,6 +197,51 @@
     </div>
   </div>
 
+  <!-- Profile Modal (Settings/Editor) -->
+  <div class="profile-modal" id="profile-modal">
+    <div class="profile-modal-backdrop" id="profile-modal-backdrop"></div>
+    <div class="profile-modal-card">
+      <button class="profile-modal-close" id="profile-modal-close-btn" title="Закрыть"><i class="fa-solid fa-xmark"></i></button>
+      <h2 class="profile-modal-title"><i class="fa-solid fa-user-pen" style="color:var(--primary-color); margin-right:8px;"></i>Настройки профиля</h2>
+      <p class="profile-modal-subtitle">Загрузите свою аватарку и шапку профиля для кастомизации.</p>
+      
+      <div class="profile-edit-layout">
+        <!-- Preview Card -->
+        <div class="profile-preview-card">
+          <div class="profile-preview-banner" id="profile-preview-banner"></div>
+          <div class="profile-preview-avatar-container">
+            <div class="profile-preview-avatar" id="profile-preview-avatar"></div>
+          </div>
+          <div class="profile-preview-info">
+            <h3 id="profile-preview-username">Steve</h3>
+            <p id="profile-preview-uid">UID: MS-XXXXX</p>
+            <div id="profile-preview-badge" style="margin-top: 4px;"></div>
+          </div>
+        </div>
+        
+        <!-- Upload Forms -->
+        <div class="profile-upload-forms">
+          <div class="form-group">
+            <label class="form-label" style="font-size:13px; font-weight:600;"><i class="fa-solid fa-image" style="color:var(--primary-color);"></i> Загрузить шапку профиля</label>
+            <input type="file" id="profile-banner-input" accept="image/*" class="form-input" style="padding: 8px 12px; font-size:13px;">
+            <p class="form-label" style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Рекомендуемое соотношение сторон: 3:1 (макс. 1.5 МБ)</p>
+          </div>
+          
+          <div class="form-group" style="margin-top:12px;">
+            <label class="form-label" style="font-size:13px; font-weight:600;"><i class="fa-solid fa-circle-user" style="color:var(--primary-color);"></i> Загрузить аватарку</label>
+            <input type="file" id="profile-avatar-input" accept="image/*" class="form-input" style="padding: 8px 12px; font-size:13px;">
+            <p class="form-label" style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Квадратное изображение (макс. 1.5 МБ)</p>
+          </div>
+          
+          <div style="margin-top:20px; display:flex; gap:12px; justify-content:flex-end;">
+            <button class="btn btn-secondary" id="btn-profile-close" style="padding: 10px 20px;">Отмена</button>
+            <button class="btn btn-primary" id="btn-profile-save" style="padding: 10px 20px; background-color: var(--primary-color); justify-content:center;"><i class="fa-solid fa-floppy-disk"></i> Сохранить</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Sidebar Drawer Backdrop for Mobile -->
   <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
 

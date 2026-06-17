@@ -96,6 +96,7 @@ function initApp() {
   renderUserAuth();
   setupAuthModalEvents();
   setupGoogleChooserEvents();
+  setupProfileModalEvents();
 }
 
 // --- THEME MANAGEMENT ---
@@ -1573,6 +1574,8 @@ function renderUserAuth() {
         ` : ''}
         <button class="user-menu-item" id="user-menu-my-projects"><i class="fa-solid fa-folder"></i> Мои проекты</button>
         <div class="user-menu-divider"></div>
+        <button class="user-menu-item" id="user-menu-profile"><i class="fa-solid fa-user-gear"></i> Настройки профиля</button>
+        <div class="user-menu-divider"></div>
         <button class="user-menu-item" id="user-menu-logout" style="color: #ef4444;"><i class="fa-solid fa-right-from-bracket"></i> Выйти</button>
       </div>
     `;
@@ -1597,6 +1600,10 @@ function renderUserAuth() {
 
     document.getElementById("user-menu-my-projects").addEventListener("click", () => {
       window.location.hash = `#/browse?q=${encodeURIComponent(currentUser.username)}`;
+    });
+
+    document.getElementById("user-menu-profile").addEventListener("click", () => {
+      openProfileModal();
     });
 
     document.getElementById("user-menu-logout").addEventListener("click", () => {
@@ -1854,6 +1861,135 @@ function setupGoogleChooserEvents() {
     
     loginWithGoogleAccount(customAcc);
   });
+}
+
+// --- PROFILE EDIT MODAL HANDLERS ---
+let tempAvatarData = null;
+let tempBannerData = null;
+
+function openProfileModal() {
+  const currentUser = JSON.parse(localStorage.getItem("current_user"));
+  if (!currentUser) return;
+
+  document.getElementById("profile-preview-username").textContent = currentUser.username;
+  document.getElementById("profile-preview-uid").textContent = `UID: ${currentUser.uid || 'MS-XXXXX'}`;
+  document.getElementById("profile-preview-badge").innerHTML = getRoleBadgeHTML(currentUser.role);
+  
+  const avatarEl = document.getElementById("profile-preview-avatar");
+  avatarEl.innerHTML = `<img src="${currentUser.avatar || 'https://api.dicebear.com/7.x/pixel-art/svg?seed=' + currentUser.username}" alt="Avatar">`;
+
+  const bannerEl = document.getElementById("profile-preview-banner");
+  if (currentUser.banner) {
+    bannerEl.style.backgroundImage = `url(${currentUser.banner})`;
+    bannerEl.style.backgroundSize = "cover";
+    bannerEl.style.backgroundPosition = "center";
+  } else {
+    bannerEl.style.backgroundImage = `linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%)`;
+  }
+
+  // Clear inputs
+  document.getElementById("profile-banner-input").value = "";
+  document.getElementById("profile-avatar-input").value = "";
+
+  // Reset local temp storage
+  tempAvatarData = null;
+  tempBannerData = null;
+
+  document.getElementById("profile-modal").classList.add("active");
+}
+
+function closeProfileModal() {
+  document.getElementById("profile-modal").classList.remove("active");
+}
+
+function setupProfileModalEvents() {
+  const backdrop = document.getElementById("profile-modal-backdrop");
+  const closeBtn = document.getElementById("profile-modal-close-btn");
+  const cancelBtn = document.getElementById("btn-profile-close");
+  const saveBtn = document.getElementById("btn-profile-save");
+  
+  const avatarInput = document.getElementById("profile-avatar-input");
+  const bannerInput = document.getElementById("profile-banner-input");
+
+  if (backdrop) backdrop.addEventListener("click", closeProfileModal);
+  if (closeBtn) closeBtn.addEventListener("click", closeProfileModal);
+  if (cancelBtn) cancelBtn.addEventListener("click", closeProfileModal);
+
+  if (avatarInput) {
+    avatarInput.addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        if (file.size > 1.5 * 1024 * 1024) {
+          showToast("Размер аватарки не должен превышать 1.5 МБ!", "info");
+          avatarInput.value = "";
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          tempAvatarData = event.target.result;
+          document.getElementById("profile-preview-avatar").innerHTML = `<img src="${tempAvatarData}" alt="Avatar">`;
+        };
+        reader.readAsDataURL(file);
+      }
+    });
+  }
+
+  if (bannerInput) {
+    bannerInput.addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        if (file.size > 1.5 * 1024 * 1024) {
+          showToast("Размер шапки не должен превышать 1.5 МБ!", "info");
+          bannerInput.value = "";
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          tempBannerData = event.target.result;
+          const bannerEl = document.getElementById("profile-preview-banner");
+          bannerEl.style.backgroundImage = `url(${tempBannerData})`;
+          bannerEl.style.backgroundSize = "cover";
+          bannerEl.style.backgroundPosition = "center";
+        };
+        reader.readAsDataURL(file);
+      }
+    });
+  }
+
+  if (saveBtn) {
+    saveBtn.addEventListener("click", () => {
+      const currentUser = JSON.parse(localStorage.getItem("current_user"));
+      if (!currentUser) return;
+
+      const registeredUsers = JSON.parse(localStorage.getItem("registered_users") || "[]");
+      const userInDb = registeredUsers.find(u => u.uid === currentUser.uid);
+
+      if (tempAvatarData) {
+        currentUser.avatar = tempAvatarData;
+        if (userInDb) userInDb.avatar = tempAvatarData;
+      }
+      if (tempBannerData) {
+        currentUser.banner = tempBannerData;
+        if (userInDb) userInDb.banner = tempBannerData;
+      }
+
+      localStorage.setItem("current_user", JSON.stringify(currentUser));
+      localStorage.setItem("registered_users", JSON.stringify(registeredUsers));
+
+      showToast("Профиль успешно обновлен!", "success");
+      renderUserAuth();
+      
+      if (window.location.hash === "#/admin") {
+        renderAdminPanel();
+      } else if (window.location.hash === "#/") {
+        renderHome();
+      } else if (window.location.hash === "#/browse") {
+        renderBrowseResults();
+      }
+
+      closeProfileModal();
+    });
+  }
 }
 
 function renderAvatar(avatar) {
