@@ -55,7 +55,7 @@ const METADATA = {
 function initUserDatabase() {
   const DEFAULT_USERS = [
     {
-      uid: "MS-00001",
+      uid: "0001",
       username: "MineDev",
       email: "finalwarningbee@gmail.com",
       password: "github",
@@ -63,7 +63,7 @@ function initUserDatabase() {
       avatar: "https://api.dicebear.com/7.x/pixel-art/svg?seed=MineDev"
     },
     {
-      uid: "MS-00002",
+      uid: "0002",
       username: "Steve",
       email: "steve@minecraft.net",
       password: "stevepassword",
@@ -71,7 +71,7 @@ function initUserDatabase() {
       avatar: "https://api.dicebear.com/7.x/pixel-art/svg?seed=Steve"
     },
     {
-      uid: "MS-00003",
+      uid: "0003",
       username: "Alex",
       email: "alex@minecraft.net",
       password: "alexpassword",
@@ -81,8 +81,13 @@ function initUserDatabase() {
   ];
   
   const stored = localStorage.getItem("registered_users");
-  if (!stored || !stored.includes('"role"') || stored.includes('minedev.work@gmail.com')) {
+  if (!stored || !stored.includes('"role"') || stored.includes('minedev.work@gmail.com') || stored.includes('MS-')) {
     localStorage.setItem("registered_users", JSON.stringify(DEFAULT_USERS));
+  }
+
+  const curUser = localStorage.getItem("current_user");
+  if (curUser && curUser.includes("MS-")) {
+    localStorage.removeItem("current_user");
   }
 }
 
@@ -828,7 +833,7 @@ function renderBrowseResults() {
     modAuthors.forEach(author => {
       if (!allUsernames.has(author)) {
         users.push({
-          uid: `MS-MOCK${Math.floor(10000 + Math.random() * 90000)}`,
+          uid: String(Math.floor(Math.random() * 10000)).padStart(4, '0'),
           username: author,
           role: author === "JellySquid" || author === "CoderBot" ? "OWNER" : "PLAYER",
           avatar: `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(author)}`,
@@ -1647,7 +1652,7 @@ function renderUserAuth() {
           <div class="user-menu-info-name" style="display:flex; align-items:center; gap:4px; font-weight:700;">
             ${currentUser.username}${getRoleBadgeHTML(currentUser.role)}
           </div>
-          <div class="user-menu-info-uid" style="font-size:11px; color:var(--text-muted); margin-top:2px;">UID: ${currentUser.uid || 'MS-XXXXX'}</div>
+          <div class="user-menu-info-uid" style="font-size:11px; color:var(--text-muted); margin-top:2px;">UID: ${currentUser.uid || 'XXXX'}</div>
           <div class="user-menu-info-email" style="margin-top:2px;">${currentUser.email}</div>
         </div>
         <div class="user-menu-divider"></div>
@@ -1787,7 +1792,7 @@ function setupAuthModalEvents() {
     }
 
     const user = {
-      uid: "MS-" + Math.floor(10000 + Math.random() * 90000),
+      uid: String(Math.floor(Math.random() * 10000)).padStart(4, '0'),
       username: username,
       email: email,
       password: password,
@@ -1882,7 +1887,7 @@ function loginWithGoogleAccount(account) {
     if (!userObj) {
       const username = account.name.replace(/\s+/g, "");
       userObj = {
-        uid: "MS-" + Math.floor(10000 + Math.random() * 90000),
+        uid: String(Math.floor(Math.random() * 10000)).padStart(4, '0'),
         username: username,
         email: account.email,
         password: "google_login_no_password",
@@ -1955,7 +1960,7 @@ function openProfileModal() {
   if (!currentUser) return;
 
   document.getElementById("profile-preview-username").textContent = currentUser.username;
-  document.getElementById("profile-preview-uid").textContent = `UID: ${currentUser.uid || 'MS-XXXXX'}`;
+  document.getElementById("profile-preview-uid").textContent = `UID: ${currentUser.uid || 'XXXX'}`;
   document.getElementById("profile-preview-badge").innerHTML = getRoleBadgeHTML(currentUser.role);
   
   const avatarEl = document.getElementById("profile-preview-avatar");
@@ -2127,7 +2132,7 @@ function openPublicProfileModal(username) {
   if (!user) {
     // Fallback profile for mock authors (e.g. Sodium/Iris mock authors)
     user = {
-      uid: `MS-MOCK${Math.floor(10000 + Math.random() * 90000)}`,
+      uid: String(Math.floor(Math.random() * 10000)).padStart(4, '0'),
       username: username,
       role: username === "JellySquid" || username === "CoderBot" ? "OWNER" : "PLAYER",
       avatar: `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(username)}`,
@@ -2184,7 +2189,7 @@ function openPublicProfileModal(username) {
   const bioEl = document.getElementById("public-profile-bio");
 
   if (usernameEl) usernameEl.textContent = user.username;
-  if (uidEl) uidEl.textContent = `UID: ${user.uid || 'MS-XXXXX'}`;
+  if (uidEl) uidEl.textContent = `UID: ${user.uid || 'XXXX'}`;
   if (badgeEl) badgeEl.innerHTML = getRoleBadgeHTML(user.role || "PLAYER");
   if (bioEl) bioEl.textContent = user.bio || "Пользователь еще не рассказал о себе.";
 
@@ -2406,7 +2411,7 @@ function renderSpotlightResults(query) {
   modAuthors.forEach(author => {
     if (!allUsernames.has(author)) {
       users.push({
-        uid: `MS-MOCK${Math.floor(10000 + Math.random() * 90000)}`,
+        uid: String(Math.floor(Math.random() * 10000)).padStart(4, '0'),
         username: author,
         role: author === "JellySquid" || author === "CoderBot" ? "OWNER" : "PLAYER",
         avatar: `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(author)}`,
@@ -2627,7 +2632,7 @@ function renderAdminPanel() {
                         <strong>${user.username}</strong>
                       </div>
                     </td>
-                    <td><code style="color:var(--text-muted); font-size:12px;">${user.uid || 'MS-XXXXX'}</code></td>
+                    <td><code style="color:var(--text-muted); font-size:12px;">${user.uid || 'XXXX'}</code></td>
                     <td>${user.email}</td>
                     <td>${getRoleBadgeHTML(user.role)}</td>
                     <td>
