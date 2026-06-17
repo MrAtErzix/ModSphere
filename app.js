@@ -816,8 +816,62 @@ function renderBrowseResults() {
     return 0;
   });
 
+  // Search matching users
+  let matchingUsersHTML = "";
+  if (state.filters.q) {
+    const query = state.filters.q.toLowerCase();
+    const users = JSON.parse(localStorage.getItem("registered_users") || "[]");
+    
+    // Also collect any authors from mods that might not be registered:
+    const modAuthors = [...new Set(getMods().map(m => m.author))];
+    const allUsernames = new Set(users.map(u => u.username));
+    modAuthors.forEach(author => {
+      if (!allUsernames.has(author)) {
+        users.push({
+          uid: `MS-MOCK${Math.floor(10000 + Math.random() * 90000)}`,
+          username: author,
+          role: author === "JellySquid" || author === "CoderBot" ? "OWNER" : "PLAYER",
+          avatar: `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(author)}`,
+          banner: "",
+          bio: author === "JellySquid" 
+            ? "Разработчик Sodium — оптимизационного движка для Minecraft." 
+            : author === "CoderBot" 
+              ? "Создатель Iris Shaders — мода для поддержки шейдеров на Fabric/Sodium." 
+              : "Активный участник сообщества ModSphere."
+        });
+        allUsernames.add(author);
+      }
+    });
+
+    const filteredUsers = users.filter(u => u.username.toLowerCase().includes(query));
+    if (filteredUsers.length > 0) {
+      matchingUsersHTML = `
+        <div class="search-users-section" style="margin-bottom: 24px; padding: 20px; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: var(--radius-lg);">
+          <h4 style="font-size: 13px; text-transform: uppercase; color: var(--text-muted); margin-top: 0; margin-bottom: 14px; letter-spacing: 0.5px; display:flex; align-items:center; gap:8px;">
+            <i class="fa-solid fa-users" style="color:var(--primary-color);"></i> Найденные авторы (${filteredUsers.length})
+          </h4>
+          <div class="search-users-list" style="display: flex; gap: 16px; flex-wrap: wrap;">
+            ${filteredUsers.map(user => `
+              <div class="search-user-card" onclick="openPublicProfileModal('${user.username}')" style="cursor: pointer; display: flex; align-items: center; gap: 12px; background: var(--surface-color); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 10px 16px; transition: border-color 0.2s, box-shadow 0.2s;">
+                <div style="width: 36px; height: 36px; border-radius: 50%; overflow: hidden; background: var(--surface-color); border: 1.5px solid var(--border-color); display:flex; align-items:center; justify-content:center;">
+                  <img src="${user.avatar || 'https://api.dicebear.com/7.x/pixel-art/svg?seed=' + encodeURIComponent(user.username)}" alt="${user.username}" style="width:100%; height:100%; object-fit:cover;">
+                </div>
+                <div>
+                  <div style="font-size: 14px; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 4px;">
+                    ${user.username}
+                  </div>
+                  <div style="margin-top: 2px;">${getRoleBadgeHTML(user.role || 'PLAYER')}</div>
+                </div>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      `;
+    }
+  }
+
   // Render list
-  if (filtered.length === 0) {
+  if (filtered.length === 0 && !matchingUsersHTML) {
     container.innerHTML = `
       <div class="no-results">
         <i class="fa-solid fa-folder-open"></i>
@@ -829,41 +883,49 @@ function renderBrowseResults() {
   }
 
   container.innerHTML = "";
-  filtered.forEach(mod => {
-    const item = document.createElement("div");
-    item.className = "result-item";
-    item.addEventListener("click", (e) => {
-      if (e.target.closest(".author-link")) {
-        return;
-      }
-      window.location.hash = `#/mod/${mod.slug || mod.id}`;
-    });
 
-    const categoryBadges = mod.categories.slice(0, 3).map(cat => 
-      `<span class="result-tag">${METADATA.categories[cat] || cat}</span>`
-    ).join("");
+  if (matchingUsersHTML) {
+    const tempDiv = document.createElement("div");
+    tempDiv.innerHTML = matchingUsersHTML;
+    container.appendChild(tempDiv);
+  }
 
-    const loadersBadges = mod.loaders.map(l => 
-      `<span class="result-tag" style="background: rgba(16, 185, 129, 0.08); color: var(--primary-color); font-weight: 600;">${METADATA.loaders[l] || l}</span>`
-    ).join("");
+  if (filtered.length > 0) {
+    filtered.forEach(mod => {
+      const item = document.createElement("div");
+      item.className = "result-item";
+      item.addEventListener("click", (e) => {
+        if (e.target.closest(".author-link")) {
+          return;
+        }
+        window.location.hash = `#/mod/${mod.slug || mod.id}`;
+      });
 
-    item.innerHTML = `
-      <div class="result-icon" style="background-color: ${mod.iconColor || '#10b981'}">
-        ${renderAvatar(mod.avatar)}
-      </div>
-      <div class="result-info">
-        <div class="result-title-row">
-          <h3 class="result-title">${mod.name}</h3>
-          <span class="result-badge-type">${METADATA.types[mod.type] || mod.type}</span>
+      const categoryBadges = mod.categories.slice(0, 3).map(cat => 
+        `<span class="result-tag">${METADATA.categories[cat] || cat}</span>`
+      ).join("");
+
+      const loadersBadges = mod.loaders.map(l => 
+        `<span class="result-tag" style="background: rgba(16, 185, 129, 0.08); color: var(--primary-color); font-weight: 600;">${METADATA.loaders[l] || l}</span>`
+      ).join("");
+
+      item.innerHTML = `
+        <div class="result-icon" style="background-color: ${mod.iconColor || '#10b981'}">
+          ${renderAvatar(mod.avatar)}
         </div>
-        <p class="result-author-tag" style="font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;">
-          от <span class="author-link" style="font-weight: 600;">${mod.author}</span>${getAuthorBadgeHTML(mod.author)}
-        </p>
-        <p class="result-desc">${mod.shortDescription}</p>
-        <div class="result-tags">
-          ${loadersBadges}
-          ${categoryBadges}
-        </div>
+        <div class="result-info">
+          <div class="result-title-row">
+            <h3 class="result-title">${mod.name}</h3>
+            <span class="result-badge-type">${METADATA.types[mod.type] || mod.type}</span>
+          </div>
+          <p class="result-author-tag" style="font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;">
+            от <span class="author-link" style="font-weight: 600;">${mod.author}</span>${getAuthorBadgeHTML(mod.author)}
+          </p>
+          <p class="result-desc">${mod.shortDescription}</p>
+          <div class="result-tags">
+            ${loadersBadges}
+            ${categoryBadges}
+          </div>
       </div>
       <div class="result-stats">
         <div><i class="fa-solid fa-download"></i> <span class="result-stat-val">${formatNumber(mod.downloads)}</span></div>
@@ -2024,6 +2086,32 @@ function setupPublicProfileEvents() {
   
   if (backdrop) backdrop.addEventListener("click", closePublicProfileModal);
   if (closeBtn) closeBtn.addEventListener("click", closePublicProfileModal);
+
+  // Tab switching logic
+  const tabBio = document.getElementById("public-profile-tab-bio");
+  const tabMods = document.getElementById("public-profile-tab-mods");
+  const panelBio = document.getElementById("public-profile-panel-bio");
+  const panelMods = document.getElementById("public-profile-panel-mods");
+
+  if (tabBio && tabMods && panelBio && panelMods) {
+    tabBio.addEventListener("click", () => {
+      tabBio.classList.add("active");
+      tabMods.classList.remove("active");
+      panelBio.style.display = "block";
+      panelBio.classList.add("active");
+      panelMods.style.display = "none";
+      panelMods.classList.remove("active");
+    });
+
+    tabMods.addEventListener("click", () => {
+      tabMods.classList.add("active");
+      tabBio.classList.remove("active");
+      panelMods.style.display = "block";
+      panelMods.classList.add("active");
+      panelBio.style.display = "none";
+      panelBio.classList.remove("active");
+    });
+  }
 }
 
 function closePublicProfileModal() {
@@ -2050,6 +2138,21 @@ function openPublicProfileModal(username) {
           ? "Создатель Iris Shaders — мода для поддержки шейдеров на Fabric/Sodium." 
           : "Активный участник сообщества ModSphere."
     };
+  }
+
+  // Reset tabs to default (Bio tab active)
+  const tabBio = document.getElementById("public-profile-tab-bio");
+  const tabMods = document.getElementById("public-profile-tab-mods");
+  const panelBio = document.getElementById("public-profile-panel-bio");
+  const panelMods = document.getElementById("public-profile-panel-mods");
+
+  if (tabBio && tabMods && panelBio && panelMods) {
+    tabBio.classList.add("active");
+    tabMods.classList.remove("active");
+    panelBio.style.display = "block";
+    panelBio.classList.add("active");
+    panelMods.style.display = "none";
+    panelMods.classList.remove("active");
   }
 
   // Populate avatar
@@ -2288,13 +2391,39 @@ function renderSpotlightResults(query) {
   }
 
   const queryLC = query.toLowerCase();
-  const filtered = mods.filter(mod => 
+  
+  // Search mods
+  const filteredMods = mods.filter(mod => 
     mod.name.toLowerCase().includes(queryLC) ||
     mod.shortDescription.toLowerCase().includes(queryLC) ||
     mod.author.toLowerCase().includes(queryLC)
   );
 
-  if (filtered.length === 0) {
+  // Search users
+  const users = JSON.parse(localStorage.getItem("registered_users") || "[]");
+  const modAuthors = [...new Set(mods.map(m => m.author))];
+  const allUsernames = new Set(users.map(u => u.username));
+  modAuthors.forEach(author => {
+    if (!allUsernames.has(author)) {
+      users.push({
+        uid: `MS-MOCK${Math.floor(10000 + Math.random() * 90000)}`,
+        username: author,
+        role: author === "JellySquid" || author === "CoderBot" ? "OWNER" : "PLAYER",
+        avatar: `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(author)}`,
+        banner: "",
+        bio: author === "JellySquid" 
+          ? "Разработчик Sodium — оптимизационного движка для Minecraft." 
+          : author === "CoderBot" 
+            ? "Создатель Iris Shaders — мода для поддержки шейдеров на Fabric/Sodium." 
+            : "Активный участник сообщества ModSphere."
+      });
+      allUsernames.add(author);
+    }
+  });
+
+  const filteredUsers = users.filter(u => u.username.toLowerCase().includes(queryLC));
+
+  if (filteredMods.length === 0 && filteredUsers.length === 0) {
     resultsContainer.innerHTML = `
       <div class="overlay-no-results">
         <i class="fa-solid fa-magnifying-glass"></i>
@@ -2305,9 +2434,58 @@ function renderSpotlightResults(query) {
   }
 
   resultsContainer.innerHTML = "";
-  filtered.forEach(mod => {
-    resultsContainer.appendChild(createSpotlightResultItem(mod));
+  
+  // Show matched users if any
+  if (filteredUsers.length > 0) {
+    const userSectionTitle = document.createElement("div");
+    userSectionTitle.style = "font-size:11px; font-weight:700; color:var(--text-muted); padding: 8px 16px 4px 16px; text-transform:uppercase; letter-spacing:0.5px; border-bottom:1px solid var(--border-color); margin-bottom:4px;";
+    userSectionTitle.textContent = "Найденные авторы";
+    resultsContainer.appendChild(userSectionTitle);
+    
+    filteredUsers.forEach(user => {
+      resultsContainer.appendChild(createSpotlightUserItem(user));
+    });
+  }
+
+  // Show matched mods if any
+  if (filteredMods.length > 0) {
+    const modSectionTitle = document.createElement("div");
+    modSectionTitle.style = "font-size:11px; font-weight:700; color:var(--text-muted); padding: 12px 16px 4px 16px; text-transform:uppercase; letter-spacing:0.5px; border-bottom:1px solid var(--border-color); margin-bottom:4px;";
+    modSectionTitle.textContent = "Проекты";
+    resultsContainer.appendChild(modSectionTitle);
+    
+    filteredMods.forEach(mod => {
+      resultsContainer.appendChild(createSpotlightResultItem(mod));
+    });
+  }
+}
+
+function createSpotlightUserItem(user) {
+  const el = document.createElement("div");
+  el.className = "overlay-result-item user-search-result";
+  
+  el.innerHTML = `
+    <div class="overlay-result-icon" style="background-color: var(--surface-color); border: 1.5px solid var(--border-color); border-radius: 50%; padding: 0; overflow: hidden; width: 36px; height: 36px; display:flex; align-items:center; justify-content:center;">
+      <img src="${user.avatar || 'https://api.dicebear.com/7.x/pixel-art/svg?seed=' + encodeURIComponent(user.username)}" alt="${user.username}" style="width: 100%; height: 100%; object-fit: cover;">
+    </div>
+    <div class="overlay-result-info">
+      <div class="overlay-result-title-row" style="display:flex; align-items:center; gap:4px;">
+        <span class="overlay-result-title">${user.username}</span>
+        ${getRoleBadgeHTML(user.role || "PLAYER")}
+      </div>
+      <div class="overlay-result-desc">${user.bio || "Пользователь платформы ModSphere."}</div>
+    </div>
+    <div class="overlay-result-meta">
+      <span class="result-tag" style="background: rgba(139, 92, 246, 0.08); color: var(--secondary-color); font-size:10px; padding:1px 6px;">Пользователь</span>
+    </div>
+  `;
+
+  el.addEventListener("click", () => {
+    deactivateSpotlightSearch();
+    openPublicProfileModal(user.username);
   });
+
+  return el;
 }
 
 function createSpotlightResultItem(mod) {

@@ -3304,6 +3304,22 @@ h1, h2, h3, h4, h5, h6 {
   }
 }
 
+/* --- PUBLIC PROFILE TABS --- */
+.public-profile-tab {
+  border: 1px solid transparent !important;
+}
+
+.public-profile-tab:hover {
+  color: var(--text-primary) !important;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.public-profile-tab.active {
+  color: var(--primary-color) !important;
+  background: rgba(16, 185, 129, 0.1) !important;
+  border: 1px solid rgba(16, 185, 129, 0.2) !important;
+}
+
 
 
 
