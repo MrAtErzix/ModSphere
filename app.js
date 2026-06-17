@@ -1979,6 +1979,7 @@ function openProfileModal() {
   document.getElementById("profile-banner-input").value = "";
   document.getElementById("profile-avatar-input").value = "";
   document.getElementById("profile-bio-input").value = currentUser.bio || "";
+  document.getElementById("profile-username-input").value = currentUser.username || "";
 
   // Reset local temp storage
   tempAvatarData = null;
@@ -2053,6 +2054,24 @@ function setupProfileModalEvents() {
       const registeredUsers = JSON.parse(localStorage.getItem("registered_users") || "[]");
       const userInDb = registeredUsers.find(u => u.uid === currentUser.uid);
 
+      const newUsername = document.getElementById("profile-username-input").value.trim();
+      if (!newUsername) {
+        showToast("Никнейм не может быть пустым!", "error");
+        return;
+      }
+
+      // Check if username is already taken by someone else
+      const nameExists = registeredUsers.some(u => u.username.toLowerCase() === newUsername.toLowerCase() && u.uid !== currentUser.uid);
+      if (nameExists) {
+        showToast("Этот никнейм уже занят другим пользователем!", "error");
+        return;
+      }
+
+      // Update nickname
+      const oldUsername = currentUser.username;
+      currentUser.username = newUsername;
+      if (userInDb) userInDb.username = newUsername;
+
       if (tempAvatarData) {
         currentUser.avatar = tempAvatarData;
         if (userInDb) userInDb.avatar = tempAvatarData;
@@ -2068,6 +2087,21 @@ function setupProfileModalEvents() {
 
       localStorage.setItem("current_user", JSON.stringify(currentUser));
       localStorage.setItem("registered_users", JSON.stringify(registeredUsers));
+
+      // Update any mods where this user is the author
+      if (oldUsername !== newUsername) {
+        const mods = getMods();
+        let updatedCount = 0;
+        mods.forEach(mod => {
+          if (mod.author === oldUsername) {
+            mod.author = newUsername;
+            updatedCount++;
+          }
+        });
+        if (updatedCount > 0) {
+          localStorage.setItem("mods_data", JSON.stringify(mods));
+        }
+      }
 
       showToast("Профиль успешно обновлен!", "success");
       renderUserAuth();
