@@ -168,10 +168,10 @@ function setupTheme() {
   });
 }
 
-// --- ROUTING SYSTEM ---
 function setupRouting() {
   window.addEventListener("hashchange", handleRoute);
-  window.addEventListener("load", handleRoute);
+  // Explicitly run routing to handle initial page load (load event may have already fired)
+  handleRoute();
 }
 
 function handleRoute() {
