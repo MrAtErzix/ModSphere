@@ -2527,7 +2527,7 @@ function createSpotlightResultItem(mod) {
 }
 
 // --- VIEW 5: ADMIN MANAGEMENT PANEL ---
-function renderAdminPanel() {
+function renderAdminPanel(activeTab = "mods") {
   const container = document.getElementById("main-content");
   const users = JSON.parse(localStorage.getItem("registered_users") || "[]");
   const mods = getMods();
@@ -2542,16 +2542,16 @@ function renderAdminPanel() {
       </div>
 
       <div class="admin-tabs">
-        <button class="admin-tab-btn active" id="admin-tab-mods-btn">
+        <button class="admin-tab-btn ${activeTab === 'mods' ? 'active' : ''}" id="admin-tab-mods-btn">
           <i class="fa-solid fa-file-shield"></i> Проекты на проверку (${pendingMods.length})
         </button>
-        <button class="admin-tab-btn" id="admin-tab-users-btn">
+        <button class="admin-tab-btn ${activeTab === 'users' ? 'active' : ''}" id="admin-tab-users-btn">
           <i class="fa-solid fa-users-gear"></i> Пользователи (${users.length})
         </button>
       </div>
 
       <!-- Projects Moderation Tab Content -->
-      <div class="admin-tab-content active" id="admin-content-mods">
+      <div class="admin-tab-content ${activeTab === 'mods' ? 'active' : ''}" id="admin-content-mods" style="display: ${activeTab === 'mods' ? 'block' : 'none'};">
         ${pendingMods.length === 0 ? `
           <div class="no-results" style="padding: 48px 20px;">
             <i class="fa-solid fa-circle-check" style="font-size: 48px; color: var(--primary-color);"></i>
@@ -2608,7 +2608,7 @@ function renderAdminPanel() {
       </div>
 
       <!-- Users Management Tab Content -->
-      <div class="admin-tab-content" id="admin-content-users" style="display:none;">
+      <div class="admin-tab-content ${activeTab === 'users' ? 'active' : ''}" id="admin-content-users" style="display: ${activeTab === 'users' ? 'block' : 'none'};">
         <div class="admin-users-table-container">
           <table class="admin-users-table">
             <thead>
@@ -2629,7 +2629,12 @@ function renderAdminPanel() {
                     <td>
                       <div style="display:flex; align-items:center; gap:8px;">
                         <img src="${user.avatar || 'https://api.dicebear.com/7.x/pixel-art/svg?seed=' + user.username}" alt="Avatar" class="user-avatar" style="width:28px; height:28px;">
-                        <strong>${user.username}</strong>
+                        <strong class="admin-username-display" data-uid="${user.uid}">${user.username}</strong>
+                        ${(!isSelf && !(isOwner && currentUser.role !== 'OWNER')) ? `
+                          <button class="btn btn-secondary btn-sm btn-edit-username" data-uid="${user.uid}" title="Редактировать ник" style="padding: 2px 6px; font-size: 11px; margin-left: 6px; display:inline-flex; align-items:center; justify-content:center;">
+                            <i class="fa-solid fa-pen" style="font-size:10px;"></i>
+                          </button>
+                        ` : ''}
                       </div>
                     </td>
                     <td><code style="color:var(--text-muted); font-size:12px;">${user.uid || 'XXXX'}</code></td>
@@ -2716,6 +2721,55 @@ function renderAdminPanel() {
       changeUserRole(uid, newRole);
     });
   });
+
+  // --- ACTIONS: USERNAME MANAGEMENT ---
+  document.querySelectorAll(".btn-edit-username").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const uid = btn.getAttribute("data-uid");
+      const registeredUsers = JSON.parse(localStorage.getItem("registered_users") || "[]");
+      const user = registeredUsers.find(u => u.uid === uid);
+      if (!user) return;
+      
+      const newNickname = prompt(`Редактирование никнейма для ${user.username}. Введите новый ник:`, user.username);
+      if (newNickname === null) return; // Cancelled
+      
+      const trimmed = newNickname.trim();
+      if (!trimmed) {
+        showToast("Никнейм не может быть пустым!", "error");
+        return;
+      }
+      
+      // Check if username is already taken
+      const nameExists = registeredUsers.some(u => u.username.toLowerCase() === trimmed.toLowerCase() && u.uid !== uid);
+      if (nameExists) {
+        showToast("Этот никнейм уже занят!", "error");
+        return;
+      }
+      
+      // Update nickname
+      const oldUsername = user.username;
+      user.username = trimmed;
+      localStorage.setItem("registered_users", JSON.stringify(registeredUsers));
+      
+      // Update any mods where this user is the author
+      const mods = getMods();
+      let updatedCount = 0;
+      mods.forEach(mod => {
+        if (mod.author === oldUsername) {
+          mod.author = trimmed;
+          updatedCount++;
+        }
+      });
+      if (updatedCount > 0) {
+        localStorage.setItem("mods_data", JSON.stringify(mods));
+      }
+      
+      showToast(`Никнейм изменен с "${oldUsername}" на "${trimmed}"!`, "success");
+      
+      // Re-render staying on the users tab
+      renderAdminPanel("users");
+    });
+  });
 }
 
 function approvePendingMod(modId) {
@@ -2758,6 +2812,6 @@ function changeUserRole(uid, newRole) {
     }
     
     showToast(`Роль пользователя ${user.username} изменена с ${oldRole} на ${newRole}`, "success");
-    renderAdminPanel();
+    renderAdminPanel("users");
   }
 }
