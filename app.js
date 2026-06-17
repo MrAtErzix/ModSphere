@@ -57,8 +57,8 @@ function initUserDatabase() {
     {
       uid: "MS-00001",
       username: "MineDev",
-      email: "minedev.work@gmail.com",
-      password: "password123",
+      email: "finalwarningbee@gmail.com",
+      password: "github",
       role: "OWNER",
       avatar: "https://api.dicebear.com/7.x/pixel-art/svg?seed=MineDev"
     },
@@ -81,7 +81,7 @@ function initUserDatabase() {
   ];
   
   const stored = localStorage.getItem("registered_users");
-  if (!stored || !stored.includes('"role"')) {
+  if (!stored || !stored.includes('"role"') || stored.includes('minedev.work@gmail.com')) {
     localStorage.setItem("registered_users", JSON.stringify(DEFAULT_USERS));
   }
 }
@@ -1725,7 +1725,7 @@ function openGoogleModal() {
   
   const accountsList = document.getElementById("google-accounts-list");
   const accounts = [
-    { name: "MineDev Coder", email: "minedev.work@gmail.com", avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=minedev" },
+    { name: "MineDev Coder", email: "finalwarningbee@gmail.com", avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=minedev" },
     { name: "Steve Builder", email: "steve.builder@gmail.com", avatar: "https://api.dicebear.com/7.x/pixel-art/svg?seed=steve" },
     { name: "Alex Explorer", email: "alex.explorer@gmail.com", avatar: "https://api.dicebear.com/7.x/pixel-art/svg?seed=alex" }
   ];
@@ -1796,7 +1796,7 @@ function loginWithGoogleAccount(account) {
         username: username,
         email: account.email,
         password: "google_login_no_password",
-        role: (account.email.toLowerCase() === "minedev.work@gmail.com") ? "OWNER" : "PLAYER",
+        role: (account.email.toLowerCase() === "finalwarningbee@gmail.com") ? "OWNER" : "PLAYER",
         avatar: account.avatar
       };
       users.push(userObj);
