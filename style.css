@@ -3111,5 +3111,199 @@ h1, h2, h3, h4, h5, h6 {
   }
 }
 
+/* --- PUBLIC PROFILE MODAL (LARGE & SPACIOUS) --- */
+#public-profile-modal .profile-modal-card {
+  width: 1400px;
+  max-width: 95%;
+  min-height: 80vh;
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: rgba(18, 24, 38, 0.7);
+  backdrop-filter: blur(25px);
+  -webkit-backdrop-filter: blur(25px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.public-profile-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.public-profile-banner {
+  height: 250px;
+  background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+  background-size: cover;
+  background-position: center;
+  position: relative;
+}
+
+.public-profile-banner::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, transparent 40%, rgba(8, 12, 21, 0.8) 100%);
+}
+
+.public-profile-content {
+  display: grid;
+  grid-template-columns: 350px 1fr;
+  gap: 40px;
+  padding: 40px;
+  margin-top: -80px;
+  position: relative;
+  z-index: 2;
+}
+
+.public-profile-sidebar {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 30px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-md);
+}
+
+.public-profile-avatar-container {
+  margin-top: -90px;
+  margin-bottom: 20px;
+  width: 140px;
+  height: 140px;
+  border-radius: 20px;
+  padding: 5px;
+  background: var(--surface-color);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-lg);
+}
+
+.public-profile-avatar {
+  width: 100%;
+  height: 100%;
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--surface-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.public-profile-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.public-profile-bio-container {
+  border-top: 1px solid var(--border-color);
+  margin-top: 24px;
+  padding-top: 20px;
+  width: 100%;
+}
+
+.public-profile-bio-container h4 {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+#public-profile-bio {
+  font-size: 15px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.public-profile-main {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.public-profile-mods-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
+  max-height: 550px;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+/* Custom scrollbar for projects grid */
+.public-profile-mods-grid::-webkit-scrollbar {
+  width: 6px;
+}
+
+.public-profile-mods-grid::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.public-profile-mods-grid::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+.public-profile-mods-grid::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* --- CLICKABLE AUTHOR LINK GLOW --- */
+.author-link {
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: color var(--transition-fast), text-shadow var(--transition-fast);
+}
+
+.author-link:hover {
+  color: var(--primary-color) !important;
+  text-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+  text-decoration: underline;
+}
+
+@media (max-width: 992px) {
+  .public-profile-content {
+    grid-template-columns: 1fr;
+    gap: 30px;
+    padding: 24px;
+    margin-top: -60px;
+  }
+  
+  .public-profile-avatar-container {
+    width: 110px;
+    height: 110px;
+    margin-top: -75px;
+  }
+  
+  .public-profile-sidebar {
+    align-items: center;
+    text-align: center;
+    padding: 24px;
+    width: 100%;
+  }
+  
+  .public-profile-sidebar h2 {
+    text-align: center;
+  }
+  
+  .public-profile-bio-container {
+    text-align: left;
+  }
+  
+  #public-profile-modal .profile-modal-card {
+    min-height: auto;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+}
+
+
 
 

@@ -97,6 +97,7 @@ function initApp() {
   setupAuthModalEvents();
   setupGoogleChooserEvents();
   setupProfileModalEvents();
+  setupPublicProfileEvents();
 }
 
 // --- THEME MANAGEMENT ---
@@ -304,6 +305,17 @@ function setupGlobalEvents() {
   lightbox.addEventListener("click", (e) => {
     if (e.target === lightbox) lightbox.classList.remove("active");
   });
+
+  // Global click listener for author links to open their public profiles
+  document.body.addEventListener("click", (e) => {
+    const authorLink = e.target.closest(".author-link");
+    if (authorLink) {
+      e.preventDefault();
+      e.stopPropagation();
+      const username = authorLink.textContent.trim();
+      openPublicProfileModal(username);
+    }
+  });
 }
 
 
@@ -489,7 +501,10 @@ function animateCountUp(elementId, targetVal, isFormatted = false) {
 function createModCard(mod) {
   const card = document.createElement("div");
   card.className = "mod-card";
-  card.addEventListener("click", () => {
+  card.addEventListener("click", (e) => {
+    if (e.target.closest(".author-link")) {
+      return;
+    }
     window.location.hash = `#/mod/${mod.slug || mod.id}`;
   });
 
@@ -504,7 +519,7 @@ function createModCard(mod) {
       </div>
       <div class="mod-card-details">
         <h3 class="mod-card-title">${mod.name}</h3>
-        <span class="mod-card-author">от <strong>${mod.author}</strong>${getAuthorBadgeHTML(mod.author)}</span>
+        <span class="mod-card-author">от <strong class="author-link">${mod.author}</strong>${getAuthorBadgeHTML(mod.author)}</span>
       </div>
     </div>
     <p class="mod-card-desc">${mod.shortDescription}</p>
@@ -817,7 +832,10 @@ function renderBrowseResults() {
   filtered.forEach(mod => {
     const item = document.createElement("div");
     item.className = "result-item";
-    item.addEventListener("click", () => {
+    item.addEventListener("click", (e) => {
+      if (e.target.closest(".author-link")) {
+        return;
+      }
       window.location.hash = `#/mod/${mod.slug || mod.id}`;
     });
 
@@ -838,6 +856,9 @@ function renderBrowseResults() {
           <h3 class="result-title">${mod.name}</h3>
           <span class="result-badge-type">${METADATA.types[mod.type] || mod.type}</span>
         </div>
+        <p class="result-author-tag" style="font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;">
+          от <span class="author-link" style="font-weight: 600;">${mod.author}</span>${getAuthorBadgeHTML(mod.author)}
+        </p>
         <p class="result-desc">${mod.shortDescription}</p>
         <div class="result-tags">
           ${loadersBadges}
@@ -873,7 +894,7 @@ function renderModDetails(mod) {
           <h1 class="mod-detail-title">${mod.name}</h1>
           <span class="result-badge-type">${METADATA.types[mod.type] || mod.type}</span>
         </div>
-        <p class="mod-detail-author-tag">от разработчика <span>${mod.author}</span>${getAuthorBadgeHTML(mod.author)}</p>
+        <p class="mod-detail-author-tag">от разработчика <span class="author-link">${mod.author}</span>${getAuthorBadgeHTML(mod.author)}</p>
         <p class="mod-detail-desc">${mod.shortDescription}</p>
         
         <div class="mod-detail-actions">
@@ -1890,6 +1911,7 @@ function openProfileModal() {
   // Clear inputs
   document.getElementById("profile-banner-input").value = "";
   document.getElementById("profile-avatar-input").value = "";
+  document.getElementById("profile-bio-input").value = currentUser.bio || "";
 
   // Reset local temp storage
   tempAvatarData = null;
@@ -1973,6 +1995,10 @@ function setupProfileModalEvents() {
         if (userInDb) userInDb.banner = tempBannerData;
       }
 
+      const newBio = document.getElementById("profile-bio-input").value.trim();
+      currentUser.bio = newBio;
+      if (userInDb) userInDb.bio = newBio;
+
       localStorage.setItem("current_user", JSON.stringify(currentUser));
       localStorage.setItem("registered_users", JSON.stringify(registeredUsers));
 
@@ -1990,6 +2016,118 @@ function setupProfileModalEvents() {
       closeProfileModal();
     });
   }
+}
+
+function setupPublicProfileEvents() {
+  const backdrop = document.getElementById("public-profile-modal-backdrop");
+  const closeBtn = document.getElementById("public-profile-modal-close-btn");
+  
+  if (backdrop) backdrop.addEventListener("click", closePublicProfileModal);
+  if (closeBtn) closeBtn.addEventListener("click", closePublicProfileModal);
+}
+
+function closePublicProfileModal() {
+  document.getElementById("public-profile-modal").classList.remove("active");
+}
+
+function openPublicProfileModal(username) {
+  if (!username) return;
+
+  const users = JSON.parse(localStorage.getItem("registered_users") || "[]");
+  let user = users.find(u => u.username.toLowerCase() === username.toLowerCase());
+  
+  if (!user) {
+    // Fallback profile for mock authors (e.g. Sodium/Iris mock authors)
+    user = {
+      uid: `MS-MOCK${Math.floor(10000 + Math.random() * 90000)}`,
+      username: username,
+      role: username === "JellySquid" || username === "CoderBot" ? "OWNER" : "PLAYER",
+      avatar: `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(username)}`,
+      banner: "",
+      bio: username === "JellySquid" 
+        ? "Разработчик Sodium — оптимизационного движка для Minecraft." 
+        : username === "CoderBot" 
+          ? "Создатель Iris Shaders — мода для поддержки шейдеров на Fabric/Sodium." 
+          : "Активный участник сообщества ModSphere."
+    };
+  }
+
+  // Populate avatar
+  const avatarEl = document.getElementById("public-profile-avatar");
+  if (avatarEl) {
+    if (user.avatar) {
+      avatarEl.innerHTML = `<img src="${user.avatar}" alt="Avatar">`;
+    } else {
+      avatarEl.innerHTML = `<span style="font-size: 48px;">👤</span>`;
+    }
+  }
+
+  // Populate banner
+  const bannerEl = document.getElementById("public-profile-banner");
+  if (bannerEl) {
+    if (user.banner) {
+      bannerEl.style.backgroundImage = `url(${user.banner})`;
+      bannerEl.style.backgroundSize = "cover";
+      bannerEl.style.backgroundPosition = "center";
+    } else {
+      bannerEl.style.backgroundImage = `linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%)`;
+    }
+  }
+
+  // Populate text contents
+  const usernameEl = document.getElementById("public-profile-username");
+  const uidEl = document.getElementById("public-profile-uid");
+  const badgeEl = document.getElementById("public-profile-badge");
+  const bioEl = document.getElementById("public-profile-bio");
+
+  if (usernameEl) usernameEl.textContent = user.username;
+  if (uidEl) uidEl.textContent = `UID: ${user.uid || 'MS-XXXXX'}`;
+  if (badgeEl) badgeEl.innerHTML = getRoleBadgeHTML(user.role || "PLAYER");
+  if (bioEl) bioEl.textContent = user.bio || "Пользователь еще не рассказал о себе.";
+
+  // Retrieve and filter mods
+  const allMods = getMods();
+  const authorMods = allMods.filter(m => m.author.toLowerCase() === username.toLowerCase() && m.approved);
+
+  // Stats
+  const totalDownloads = authorMods.reduce((sum, m) => sum + m.downloads, 0);
+  const totalFollows = authorMods.reduce((sum, m) => sum + m.follows, 0);
+
+  const countEl = document.getElementById("public-profile-mods-count");
+  const statDownloadsEl = document.getElementById("public-profile-stat-downloads");
+  const statFollowsEl = document.getElementById("public-profile-stat-follows");
+
+  if (countEl) countEl.textContent = authorMods.length;
+  if (statDownloadsEl) statDownloadsEl.textContent = formatNumber(totalDownloads);
+  if (statFollowsEl) statFollowsEl.textContent = formatNumber(totalFollows);
+
+  // Populate Projects Grid
+  const gridEl = document.getElementById("public-profile-mods-grid");
+  if (gridEl) {
+    gridEl.innerHTML = "";
+    if (authorMods.length === 0) {
+      gridEl.innerHTML = `
+        <div class="no-results" style="padding: 48px 20px; width: 100%; grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(0,0,0,0.1); border: 1px dashed var(--border-color); border-radius: var(--radius-md);">
+          <i class="fa-solid fa-folder-open" style="font-size: 40px; color: var(--text-muted);"></i>
+          <h3 style="font-size: 16px; font-weight: 600; color: var(--text-primary); margin: 0;">Проектов не найдено</h3>
+          <p style="font-size: 13px; color: var(--text-muted); margin: 0; text-align: center;">У этого автора пока нет опубликованных и одобренных проектов.</p>
+        </div>
+      `;
+    } else {
+      authorMods.forEach(mod => {
+        const card = createModCard(mod);
+        // Ensure clicking card closes the profile modal
+        card.addEventListener("click", () => {
+          closePublicProfileModal();
+        });
+        gridEl.appendChild(card);
+      });
+    }
+  }
+
+  // Open modal
+  const modalEl = document.getElementById("public-profile-modal");
+  if (modalEl) modalEl.classList.add("active");
 }
 
 function renderAvatar(avatar) {
@@ -2252,7 +2390,7 @@ function renderAdminPanel() {
                         <h3 class="admin-pending-title">${mod.name}</h3>
                         <span class="result-badge-type">${METADATA.types[mod.type] || mod.type}</span>
                       </div>
-                      <p class="admin-pending-author">Автор: <strong>${mod.author}</strong>${getAuthorBadgeHTML(mod.author)}</p>
+                      <p class="admin-pending-author">Автор: <strong class="author-link">${mod.author}</strong>${getAuthorBadgeHTML(mod.author)}</p>
                       <p class="admin-pending-desc">${mod.shortDescription}</p>
                       
                       ${mainFile ? `
