@@ -100,7 +100,6 @@ function initApp() {
   setupSpotlightSearch();
   renderUserAuth();
   setupAuthModalEvents();
-  setupGoogleChooserEvents();
   setupProfileModalEvents();
   setupPublicProfileEvents();
 }
@@ -1724,7 +1723,18 @@ function closeAuthModal() {
   const modal = document.getElementById("auth-modal");
   modal.classList.remove("active");
   document.getElementById("login-form").reset();
-  document.getElementById("register-form").reset();
+  
+  restoreRegistrationFormHTML();
+  
+  const tabLogin = document.getElementById("tab-login-btn");
+  const tabRegister = document.getElementById("tab-register-btn");
+  const divider = document.querySelector(".auth-modal-card .auth-divider");
+  const googleBtn = document.getElementById("btn-google-login");
+  
+  if (tabLogin) tabLogin.style.display = "block";
+  if (tabRegister) tabRegister.style.display = "block";
+  if (divider) divider.style.display = "flex";
+  if (googleBtn) googleBtn.style.display = "flex";
 }
 
 function setupAuthModalEvents() {
@@ -1779,34 +1789,10 @@ function setupAuthModalEvents() {
 
   registerForm.addEventListener("submit", (e) => {
     e.preventDefault();
-    const username = document.getElementById("register-username").value.trim();
-    const email = document.getElementById("register-email").value.trim();
-    const password = document.getElementById("register-password").value;
-    
-    const users = JSON.parse(localStorage.getItem("registered_users") || "[]");
-    const exists = users.some(u => u.email.toLowerCase() === email.toLowerCase());
-    
-    if (exists) {
-      showToast("Пользователь с такой почтой уже зарегистрирован!", "info");
-      return;
+    if (document.getElementById("verification-code-input")) {
+      return; // Handled by inline submit listener in showVerificationStep
     }
-
-    const user = {
-      uid: String(Math.floor(Math.random() * 10000)).padStart(4, '0'),
-      username: username,
-      email: email,
-      password: password,
-      role: "PLAYER",
-      avatar: `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(username)}`
-    };
-
-    users.push(user);
-    localStorage.setItem("registered_users", JSON.stringify(users));
-    localStorage.setItem("current_user", JSON.stringify(user));
-    
-    showToast(`Аккаунт успешно создан! Добро пожаловать, ${username}!`, "success");
-    closeAuthModal();
-    renderUserAuth();
+    handleRegisterFormSubmit(e);
   });
 
   googleBtn.addEventListener("click", () => {
@@ -2419,7 +2405,7 @@ function renderSpotlightResults(query) {
   if (!resultsContainer) return;
 
   if (!query.trim()) {
-    const trending = [...mods].sort((a, b) => b.downloads - a.downloads).slice(0, 3);
+    const trending = [...mods].filter(m => m.approved).sort((a, b) => b.downloads - a.downloads).slice(0, 3);
     resultsContainer.innerHTML = `
       <div style="font-size:11px; font-weight:700; color:var(--text-muted); padding: 8px 16px 4px 16px; text-transform:uppercase; letter-spacing:0.5px;">Рекомендуемые проекты</div>
     `;
@@ -2433,9 +2419,11 @@ function renderSpotlightResults(query) {
   
   // Search mods
   const filteredMods = mods.filter(mod => 
-    mod.name.toLowerCase().includes(queryLC) ||
-    mod.shortDescription.toLowerCase().includes(queryLC) ||
-    mod.author.toLowerCase().includes(queryLC)
+    (mod.approved) && (
+      mod.name.toLowerCase().includes(queryLC) ||
+      mod.shortDescription.toLowerCase().includes(queryLC) ||
+      mod.author.toLowerCase().includes(queryLC)
+    )
   );
 
   // Search users
@@ -2848,4 +2836,158 @@ function changeUserRole(uid, newRole) {
     showToast(`Роль пользователя ${user.username} изменена с ${oldRole} на ${newRole}`, "success");
     renderAdminPanel("users");
   }
+}
+
+// --- EMAIL REGISTRATION VERIFICATION SYSTEM ---
+function handleRegisterFormSubmit(e) {
+  e.preventDefault();
+  const username = document.getElementById("register-username").value.trim();
+  const email = document.getElementById("register-email").value.trim();
+  const password = document.getElementById("register-password").value;
+  
+  const users = JSON.parse(localStorage.getItem("registered_users") || "[]");
+  const exists = users.some(u => u.email.toLowerCase() === email.toLowerCase());
+  
+  if (exists) {
+    showToast("Пользователь с такой почтой уже зарегистрирован!", "info");
+    return;
+  }
+
+  // Create temporary user object
+  const tempUser = {
+    uid: String(Math.floor(Math.random() * 10000)).padStart(4, '0'),
+    username: username,
+    email: email,
+    password: password,
+    role: "PLAYER",
+    avatar: `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(username)}`
+  };
+
+  const verificationCode = Math.floor(100000 + Math.random() * 900000);
+  
+  // Show sending state
+  const submitBtn = e.target.querySelector("button[type='submit']");
+  const originalBtnText = submitBtn.innerHTML;
+  submitBtn.disabled = true;
+  submitBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Отправка кода...`;
+
+  const emailJsData = {
+    service_id: 'ModSphere3',
+    template_id: 'template_waeyhik',
+    user_id: 'ExEAPt8dO-dVEm6rF',
+    template_params: {
+      to_email: email,
+      email: email,
+      to_name: username,
+      username: username,
+      message: verificationCode,
+      code: verificationCode,
+      verification_code: verificationCode
+    }
+  };
+
+  fetch("https://api.emailjs.com/api/v1.0/email/send", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(emailJsData)
+  })
+  .then(res => {
+    if (!res.ok) {
+      return res.text().then(text => { throw new Error(text || "Ошибка сервера EmailJS"); });
+    }
+    return res.text();
+  })
+  .then(data => {
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = originalBtnText;
+    showVerificationStep(tempUser, verificationCode);
+  })
+  .catch(err => {
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = originalBtnText;
+    showToast(`Не удалось отправить код: ${err.message || 'Ошибка сети'}. Проверьте правильность почты.`, "error");
+  });
+}
+
+function showVerificationStep(tempUser, verificationCode) {
+  const registerForm = document.getElementById("register-form");
+  const tabLogin = document.getElementById("tab-login-btn");
+  const tabRegister = document.getElementById("tab-register-btn");
+  const divider = document.querySelector(".auth-modal-card .auth-divider");
+  const googleBtn = document.getElementById("btn-google-login");
+
+  // Hide tabs and Google login buttons during verification to keep user focused
+  if (tabLogin) tabLogin.style.display = "none";
+  if (tabRegister) tabRegister.style.display = "none";
+  if (divider) divider.style.display = "none";
+  if (googleBtn) googleBtn.style.display = "none";
+
+  registerForm.innerHTML = `
+    <div style="text-align: center; margin-bottom: 20px;">
+      <i class="fa-solid fa-envelope-circle-check" style="font-size: 48px; color: var(--primary-color); margin-bottom: 16px;"></i>
+      <h3 style="font-size: 18px; margin-bottom: 8px; color: var(--text-primary);">Код отправлен!</h3>
+      <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.5;">Мы отправили код подтверждения на почту <strong style="color:var(--text-primary);">${tempUser.email}</strong>. Введите его ниже для завершения регистрации.</p>
+    </div>
+    
+    <div class="form-group">
+      <label class="form-label" style="text-align:center; display:block; font-size:12px; font-weight:600;">Код подтверждения *</label>
+      <input type="text" class="form-input" id="verification-code-input" required placeholder="123456" maxlength="6" style="text-align: center; font-size: 24px; font-weight: 800; letter-spacing: 6px; padding: 12px; font-family:monospace;">
+    </div>
+    
+    <div style="display:flex; gap:12px; margin-top: 20px;">
+      <button type="button" class="btn btn-secondary" id="btn-verification-back" style="flex:1; justify-content:center;">Назад</button>
+      <button type="submit" class="btn btn-primary" style="flex:2; justify-content:center; background-color: var(--primary-color); color: white;">Подтвердить</button>
+    </div>
+  `;
+
+  // Bind back button
+  document.getElementById("btn-verification-back").addEventListener("click", () => {
+    restoreRegistrationFormHTML();
+    if (tabLogin) tabLogin.style.display = "block";
+    if (tabRegister) tabRegister.style.display = "block";
+    if (divider) divider.style.display = "flex";
+    if (googleBtn) googleBtn.style.display = "flex";
+  });
+
+  // Handle code submission
+  registerForm.onsubmit = (e) => {
+    e.preventDefault();
+    const enteredCode = document.getElementById("verification-code-input").value.trim();
+    if (enteredCode === String(verificationCode)) {
+      const users = JSON.parse(localStorage.getItem("registered_users") || "[]");
+      users.push(tempUser);
+      localStorage.setItem("registered_users", JSON.stringify(users));
+      localStorage.setItem("current_user", JSON.stringify(tempUser));
+      
+      showToast(`Аккаунт успешно создан! Добро пожаловать, ${tempUser.username}!`, "success");
+      closeAuthModal();
+      renderUserAuth();
+    } else {
+      showToast("Неверный код подтверждения! Проверьте почту и попробуйте еще раз.", "error");
+    }
+  };
+}
+
+function restoreRegistrationFormHTML() {
+  const registerForm = document.getElementById("register-form");
+  if (!registerForm) return;
+  
+  registerForm.innerHTML = `
+    <div class="form-group">
+      <label class="form-label">Имя пользователя (Никнейм) *</label>
+      <input type="text" class="form-input" id="register-username" required placeholder="Steve3000">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Электронная почта *</label>
+      <input type="email" class="form-input" id="register-email" required placeholder="name@domain.com">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Пароль *</label>
+      <input type="password" class="form-input" id="register-password" required placeholder="Минимум 6 символов" minlength="6">
+    </div>
+    <button type="submit" class="btn btn-primary full-width" style="margin-top: 16px; justify-content: center;">Зарегистрироваться</button>
+  `;
+  registerForm.onsubmit = null;
 }
