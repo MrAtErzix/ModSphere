@@ -121,20 +121,29 @@ function setupRouting() {
 function handleRoute() {
   const { path, params } = parseHash();
   
-  // Highlight active header link
-  document.querySelectorAll(".nav-link").forEach(link => link.classList.remove("active"));
+  // Highlight active header and mobile navigation links
+  document.querySelectorAll(".nav-link, .mobile-nav-link").forEach(link => link.classList.remove("active"));
   
   // Collapse search input in header for Home page, show it for others
   const headerSearch = document.getElementById("header-search-container");
   if (path === "#/") {
     headerSearch.style.display = "none";
-    document.getElementById("nav-home").classList.add("active");
+    const navHome = document.getElementById("nav-home");
+    if (navHome) navHome.classList.add("active");
+    const mobileNavHome = document.getElementById("mobile-nav-home");
+    if (mobileNavHome) mobileNavHome.classList.add("active");
   } else {
     headerSearch.style.display = "flex";
     if (path === "#/browse") {
-      document.getElementById("nav-browse").classList.add("active");
+      const navBrowse = document.getElementById("nav-browse");
+      if (navBrowse) navBrowse.classList.add("active");
+      const mobileNavBrowse = document.getElementById("mobile-nav-browse");
+      if (mobileNavBrowse) mobileNavBrowse.classList.add("active");
     } else if (path === "#/create") {
-      document.getElementById("nav-create").classList.add("active");
+      const navCreate = document.getElementById("nav-create");
+      if (navCreate) navCreate.classList.add("active");
+      const mobileNavCreate = document.getElementById("mobile-nav-create");
+      if (mobileNavCreate) mobileNavCreate.classList.add("active");
     }
   }
 
@@ -250,6 +259,26 @@ function setupGlobalEvents() {
       window.location.hash = `#/browse?q=${encodeURIComponent(query)}`;
     }
   });
+
+  // Mobile Search Toggle Overlay
+  const header = document.querySelector(".main-header");
+  const searchToggle = document.getElementById("mobile-search-toggle-btn");
+  const searchClose = document.getElementById("mobile-search-close-btn");
+  
+  if (searchToggle) {
+    searchToggle.addEventListener("click", () => {
+      header.classList.add("search-active");
+      setTimeout(() => {
+        if (headerSearchInput) headerSearchInput.focus();
+      }, 100);
+    });
+  }
+  
+  if (searchClose) {
+    searchClose.addEventListener("click", () => {
+      header.classList.remove("search-active");
+    });
+  }
 
   // Lightbox close events
   const lightbox = document.getElementById("gallery-lightbox");
@@ -466,7 +495,11 @@ function renderBrowse() {
   container.innerHTML = `
     <div class="browse-layout">
       <!-- Left Sidebar Filters -->
-      <aside class="filters-sidebar">
+      <aside class="filters-sidebar" id="filters-sidebar">
+        <div class="drawer-header" style="display: none;">
+          <h3>Фильтры</h3>
+          <button class="drawer-close-btn" id="drawer-close-btn" title="Закрыть"><i class="fa-solid fa-xmark"></i></button>
+        </div>
         <div class="filter-group">
           <div class="filter-group-title">
             <span>Тип проекта</span>
@@ -532,6 +565,10 @@ function renderBrowse() {
       <section class="browse-results-panel">
         <!-- Search and Sort Panel -->
         <div class="search-controls">
+          <button class="btn btn-secondary filter-toggle-btn" id="mobile-filter-toggle" style="display: none;">
+            <i class="fa-solid fa-filter"></i> <span>Фильтры</span>
+          </button>
+          
           <div class="search-input-wrapper">
             <i class="fa-solid fa-magnifying-glass"></i>
             <input type="text" placeholder="Поиск среди сотен дополнений..." id="browse-search-input" value="${state.filters.q}">
@@ -633,6 +670,28 @@ function renderBrowse() {
     state.filters.sort = e.target.value;
     updateBrowseHash();
   });
+
+  // Mobile filter drawer toggling
+  const filterSidebar = document.getElementById("filters-sidebar");
+  const filterBackdrop = document.getElementById("sidebar-backdrop");
+  const filterToggle = document.getElementById("mobile-filter-toggle");
+  const drawerClose = document.getElementById("drawer-close-btn");
+  
+  const openDrawer = () => {
+    if (filterSidebar) filterSidebar.classList.add("active");
+    if (filterBackdrop) filterBackdrop.classList.add("active");
+    document.body.style.overflow = "hidden";
+  };
+  
+  const closeDrawer = () => {
+    if (filterSidebar) filterSidebar.classList.remove("active");
+    if (filterBackdrop) filterBackdrop.classList.remove("active");
+    document.body.style.overflow = "";
+  };
+  
+  if (filterToggle) filterToggle.addEventListener("click", openDrawer);
+  if (drawerClose) drawerClose.addEventListener("click", closeDrawer);
+  if (filterBackdrop) filterBackdrop.addEventListener("click", closeDrawer);
 
   // Render search results for the first time
   renderBrowseResults();

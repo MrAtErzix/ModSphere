@@ -30,9 +30,15 @@
       <div class="header-search-bar" id="header-search-container">
         <i class="fa-solid fa-magnifying-glass search-icon"></i>
         <input type="text" placeholder="Поиск модов, паков, плагинов..." id="header-search-input">
+        <button class="mobile-search-close" id="mobile-search-close-btn" style="display: none;" title="Закрыть поиск">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
       </div>
 
       <div class="header-actions">
+        <button class="theme-toggle mobile-search-toggle" id="mobile-search-toggle-btn" title="Поиск" style="display: none;">
+          <i class="fa-solid fa-magnifying-glass"></i>
+        </button>
         <button class="theme-toggle" id="theme-toggle" title="Переключить тему">
           <i class="fa-solid fa-moon"></i>
         </button>
@@ -190,6 +196,25 @@
       </p>
     </div>
   </div>
+
+  <!-- Sidebar Drawer Backdrop for Mobile -->
+  <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
+  <!-- Mobile Bottom Navigation -->
+  <nav class="mobile-bottom-nav" id="mobile-bottom-nav">
+    <a href="#/" class="mobile-nav-link" id="mobile-nav-home">
+      <i class="fa-solid fa-house"></i>
+      <span>Главная</span>
+    </a>
+    <a href="#/browse" class="mobile-nav-link" id="mobile-nav-browse">
+      <i class="fa-solid fa-compass"></i>
+      <span>Обзор</span>
+    </a>
+    <a href="#/create" class="mobile-nav-link" id="mobile-nav-create">
+      <i class="fa-solid fa-plus-circle"></i>
+      <span>Добавить</span>
+    </a>
+  </nav>
 
   <!-- Scripts -->
   <script src="mods.js"></script>
