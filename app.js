@@ -936,7 +936,7 @@ function renderBrowseResults() {
     container.appendChild(item);
   });
 }
-
+}
 
 // --- RENDER 3: MOD DETAILS PAGE ---
 function renderModDetails(mod) {
