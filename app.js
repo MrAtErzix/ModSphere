@@ -55,25 +55,33 @@ const METADATA = {
 function initUserDatabase() {
   const DEFAULT_USERS = [
     {
+      uid: "MS-00001",
       username: "MineDev",
       email: "minedev.work@gmail.com",
       password: "password123",
+      role: "OWNER",
       avatar: "https://api.dicebear.com/7.x/pixel-art/svg?seed=MineDev"
     },
     {
+      uid: "MS-00002",
       username: "Steve",
       email: "steve@minecraft.net",
       password: "stevepassword",
+      role: "PLAYER",
       avatar: "https://api.dicebear.com/7.x/pixel-art/svg?seed=Steve"
     },
     {
+      uid: "MS-00003",
       username: "Alex",
       email: "alex@minecraft.net",
       password: "alexpassword",
+      role: "PLAYER",
       avatar: "https://api.dicebear.com/7.x/pixel-art/svg?seed=Alex"
     }
   ];
-  if (!localStorage.getItem("registered_users")) {
+  
+  const stored = localStorage.getItem("registered_users");
+  if (!stored || !stored.includes('"role"')) {
     localStorage.setItem("registered_users", JSON.stringify(DEFAULT_USERS));
   }
 }
@@ -184,6 +192,14 @@ function handleRoute() {
     } else {
       renderCreateForm();
     }
+  } else if (path === "#/admin") {
+    const currentUser = JSON.parse(localStorage.getItem("current_user"));
+    if (!currentUser || (currentUser.role !== "ADMIN" && currentUser.role !== "OWNER")) {
+      showToast("Доступ ограничен! Требуются права модератора/администратора.", "info");
+      window.location.hash = "#/";
+    } else {
+      renderAdminPanel();
+    }
   } else {
     // Default fallback
     window.location.hash = "#/";
@@ -290,10 +306,29 @@ function setupGlobalEvents() {
 }
 
 
+function getRoleBadgeHTML(role) {
+  if (!role) return "";
+  const r = role.toUpperCase();
+  let className = "role-player";
+  if (r === "ADMIN") className = "role-admin";
+  if (r === "OWNER") className = "role-owner";
+  return `<span class="role-badge ${className}">${r}</span>`;
+}
+
+function getAuthorBadgeHTML(authorName) {
+  const users = JSON.parse(localStorage.getItem("registered_users") || "[]");
+  const user = users.find(u => u.username === authorName);
+  if (user) {
+    return getRoleBadgeHTML(user.role);
+  }
+  return "";
+}
+
+
 // --- RENDER 1: HOME PAGE ---
 function renderHome() {
   const container = document.getElementById("main-content");
-  const mods = getMods();
+  const mods = getMods().filter(m => m.approved);
   
   // Calculate aggregate stats (100% real numbers from mods database!)
   const totalDownloads = mods.reduce((sum, m) => sum + m.downloads, 0);
@@ -468,7 +503,7 @@ function createModCard(mod) {
       </div>
       <div class="mod-card-details">
         <h3 class="mod-card-title">${mod.name}</h3>
-        <span class="mod-card-author">от <strong>${mod.author}</strong></span>
+        <span class="mod-card-author">от <strong>${mod.author}</strong>${getAuthorBadgeHTML(mod.author)}</span>
       </div>
     </div>
     <p class="mod-card-desc">${mod.shortDescription}</p>
@@ -699,7 +734,14 @@ function renderBrowse() {
 
 function renderBrowseResults() {
   const container = document.getElementById("results-list-container");
-  const mods = getMods();
+  const currentUser = JSON.parse(localStorage.getItem("current_user"));
+  const mods = getMods().filter(m => {
+    if (m.approved) return true;
+    if (currentUser && (m.author === currentUser.username || currentUser.role === "ADMIN" || currentUser.role === "OWNER")) {
+      return true;
+    }
+    return false;
+  });
   
   // Apply filtering
   let filtered = mods.filter(mod => {
@@ -830,7 +872,7 @@ function renderModDetails(mod) {
           <h1 class="mod-detail-title">${mod.name}</h1>
           <span class="result-badge-type">${METADATA.types[mod.type] || mod.type}</span>
         </div>
-        <p class="mod-detail-author-tag">от разработчика <span>${mod.author}</span></p>
+        <p class="mod-detail-author-tag">от разработчика <span>${mod.author}</span>${getAuthorBadgeHTML(mod.author)}</p>
         <p class="mod-detail-desc">${mod.shortDescription}</p>
         
         <div class="mod-detail-actions">
@@ -1092,15 +1134,22 @@ function triggerVersionDownload(mod, version, countSpanElement) {
     }
     
     // Trigger virtual file download
-    const blob = new Blob([`Dummy JAR content for ${mod.name}`], { type: "application/java-archive" });
-    const url = URL.createObjectURL(blob);
+    let downloadUrl;
+    if (version.fileData && version.fileData.startsWith("data:")) {
+      downloadUrl = version.fileData;
+    } else {
+      const blob = new Blob([`Dummy JAR content for ${mod.name}`], { type: "application/java-archive" });
+      downloadUrl = URL.createObjectURL(blob);
+    }
     const a = document.createElement("a");
-    a.href = url;
+    a.href = downloadUrl;
     a.download = version.filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    if (downloadUrl.startsWith("blob:")) {
+      URL.revokeObjectURL(downloadUrl);
+    }
     
     showToast(`Файл ${version.filename} успешно сохранен!`, "success");
   }, 1200);
@@ -1167,6 +1216,13 @@ function renderCreateForm() {
           <div class="form-group">
             <label class="form-label">Лицензия</label>
             <input type="text" class="form-input" id="form-license" value="MIT" placeholder="MIT, LGPL-3.0, Proprietary">
+          </div>
+
+          <!-- Mod File Upload -->
+          <div class="form-group full-width" style="border: 2px dashed var(--border-color); padding: 20px; border-radius: var(--radius-md); text-align: center; background: rgba(255,255,255,0.01); margin-bottom: 8px;">
+            <label class="form-label" style="font-weight: 700;"><i class="fa-solid fa-file-zipper" style="color: var(--primary-color); margin-right: 6px;"></i> Загрузить файл проекта (.jar, .zip) *</label>
+            <input type="file" id="form-mod-file" required accept=".jar,.zip,.rar" class="form-input" style="padding: 10px; margin-top: 8px; max-width: 100%;">
+            <p class="form-label" style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">Максимальный размер для сохранения в БД: 1.5 МБ. Более крупные файлы будут сохранены в виде метаданных.</p>
           </div>
 
           <!-- Avatar / Logo Customizer -->
@@ -1312,6 +1368,35 @@ function renderCreateForm() {
     }
   });
 
+  // Project Mod File Reader
+  let modFileName = "";
+  let modFileSize = "";
+  let modFileData = "";
+
+  setTimeout(() => {
+    const modFileInput = document.getElementById("form-mod-file");
+    if (modFileInput) {
+      modFileInput.addEventListener("change", (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          modFileName = file.name;
+          modFileSize = (file.size / (1024 * 1024)).toFixed(2) + " MB";
+          
+          if (file.size > 1.5 * 1024 * 1024) {
+            modFileData = "data:application/octet-stream;base64,TW9kU3BoZXJlTW9kRmlsZUNvbnRlbnRzTW9ja1VwbG9hZA==";
+            showToast("Файл сохранен (сжатая демо-версия для экономии локального хранилища)", "info");
+          } else {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+              modFileData = event.target.result;
+            };
+            reader.readAsDataURL(file);
+          }
+        }
+      });
+    }
+  }, 100);
+
   // Preset icon choices
   document.querySelectorAll(".preset-icon-item").forEach(item => {
     item.addEventListener("click", () => {
@@ -1403,10 +1488,14 @@ function renderCreateForm() {
       sourceUrl: source || null,
       issuesUrl: issues || null,
       gallery: [],
+      filename: modFileName || `${slug}-1.0.0.jar`,
+      fileSize: modFileSize || "450 KB",
+      fileData: modFileData || "",
+      approved: false
     };
 
     saveMod(newMod);
-    showToast("Проект успешно опубликован!", "success");
+    showToast("Проект успешно создан и отправлен на модерацию!", "success");
 
     setTimeout(() => {
       window.location.hash = `#/mod/${slug}`;
@@ -1462,18 +1551,26 @@ function renderUserAuth() {
   const currentUser = JSON.parse(localStorage.getItem("current_user"));
 
   if (currentUser) {
+    const isAdminOrOwner = currentUser.role === "ADMIN" || currentUser.role === "OWNER";
     wrapper.innerHTML = `
       <div class="user-profile" id="header-user-profile">
         <img src="${currentUser.avatar || 'https://api.dicebear.com/7.x/pixel-art/svg?seed=' + currentUser.username}" alt="Аватар" class="user-avatar">
-        <span class="user-name">${currentUser.username}</span>
+        <span class="user-name" style="display:inline-flex; align-items:center; gap:2px;">${currentUser.username}${getRoleBadgeHTML(currentUser.role)}</span>
         <i class="fa-solid fa-chevron-down" style="font-size: 10px; margin-left: 4px; color: var(--text-secondary);"></i>
       </div>
       <div class="user-menu-dropdown" id="user-menu-dropdown">
         <div class="user-menu-info">
-          <div class="user-menu-info-name">${currentUser.username}</div>
-          <div class="user-menu-info-email">${currentUser.email}</div>
+          <div class="user-menu-info-name" style="display:flex; align-items:center; gap:4px; font-weight:700;">
+            ${currentUser.username}${getRoleBadgeHTML(currentUser.role)}
+          </div>
+          <div class="user-menu-info-uid" style="font-size:11px; color:var(--text-muted); margin-top:2px;">UID: ${currentUser.uid || 'MS-XXXXX'}</div>
+          <div class="user-menu-info-email" style="margin-top:2px;">${currentUser.email}</div>
         </div>
         <div class="user-menu-divider"></div>
+        ${isAdminOrOwner ? `
+          <button class="user-menu-item" id="user-menu-admin"><i class="fa-solid fa-crown" style="color:var(--primary-color);"></i> Админ-панель</button>
+          <div class="user-menu-divider"></div>
+        ` : ''}
         <button class="user-menu-item" id="user-menu-my-projects"><i class="fa-solid fa-folder"></i> Мои проекты</button>
         <div class="user-menu-divider"></div>
         <button class="user-menu-item" id="user-menu-logout" style="color: #ef4444;"><i class="fa-solid fa-right-from-bracket"></i> Выйти</button>
@@ -1492,6 +1589,12 @@ function renderUserAuth() {
       dropdown.classList.remove("active");
     });
 
+    if (isAdminOrOwner) {
+      document.getElementById("user-menu-admin").addEventListener("click", () => {
+        window.location.hash = "#/admin";
+      });
+    }
+
     document.getElementById("user-menu-my-projects").addEventListener("click", () => {
       window.location.hash = `#/browse?q=${encodeURIComponent(currentUser.username)}`;
     });
@@ -1500,7 +1603,7 @@ function renderUserAuth() {
       localStorage.removeItem("current_user");
       showToast("Вы успешно вышли из аккаунта", "info");
       renderUserAuth();
-      if (window.location.hash === "#/create") {
+      if (window.location.hash === "#/create" || window.location.hash === "#/admin") {
         window.location.hash = "#/";
       }
     });
@@ -1594,9 +1697,11 @@ function setupAuthModalEvents() {
     }
 
     const user = {
+      uid: "MS-" + Math.floor(10000 + Math.random() * 90000),
       username: username,
       email: email,
       password: password,
+      role: "PLAYER",
       avatar: `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(username)}`
     };
 
@@ -1682,16 +1787,18 @@ function loginWithGoogleAccount(account) {
   
   setTimeout(() => {
     const users = JSON.parse(localStorage.getItem("registered_users") || "[]");
-    const exists = users.some(u => u.email.toLowerCase() === account.email.toLowerCase());
+    let userObj = users.find(u => u.email.toLowerCase() === account.email.toLowerCase());
     
-    const username = account.name.replace(/\s+/g, "");
-    const userObj = {
-      username: username,
-      email: account.email,
-      avatar: account.avatar
-    };
-    
-    if (!exists) {
+    if (!userObj) {
+      const username = account.name.replace(/\s+/g, "");
+      userObj = {
+        uid: "MS-" + Math.floor(10000 + Math.random() * 90000),
+        username: username,
+        email: account.email,
+        password: "google_login_no_password",
+        role: (account.email.toLowerCase() === "minedev.work@gmail.com") ? "OWNER" : "PLAYER",
+        avatar: account.avatar
+      };
       users.push(userObj);
       localStorage.setItem("registered_users", JSON.stringify(users));
     }
@@ -1960,4 +2067,240 @@ function createSpotlightResultItem(mod) {
   });
 
   return el;
+}
+
+// --- VIEW 5: ADMIN MANAGEMENT PANEL ---
+function renderAdminPanel() {
+  const container = document.getElementById("main-content");
+  const users = JSON.parse(localStorage.getItem("registered_users") || "[]");
+  const mods = getMods();
+  const pendingMods = mods.filter(m => !m.approved);
+  const currentUser = JSON.parse(localStorage.getItem("current_user"));
+
+  container.innerHTML = `
+    <div class="admin-panel-container">
+      <div class="admin-panel-header">
+        <h2><i class="fa-solid fa-crown" style="color: var(--primary-color); margin-right: 8px;"></i>Панель управления ModSphere</h2>
+        <p>Модерация публикуемых файлов и выдача титулов (ролей) пользователям платформы.</p>
+      </div>
+
+      <div class="admin-tabs">
+        <button class="admin-tab-btn active" id="admin-tab-mods-btn">
+          <i class="fa-solid fa-file-shield"></i> Проекты на проверку (${pendingMods.length})
+        </button>
+        <button class="admin-tab-btn" id="admin-tab-users-btn">
+          <i class="fa-solid fa-users-gear"></i> Пользователи (${users.length})
+        </button>
+      </div>
+
+      <!-- Projects Moderation Tab Content -->
+      <div class="admin-tab-content active" id="admin-content-mods">
+        ${pendingMods.length === 0 ? `
+          <div class="no-results" style="padding: 48px 20px;">
+            <i class="fa-solid fa-circle-check" style="font-size: 48px; color: var(--primary-color);"></i>
+            <h3>Очередь проверки пуста</h3>
+            <p>Все загруженные проекты уже проверены и опубликованы.</p>
+          </div>
+        ` : `
+          <div class="admin-pending-list">
+            ${pendingMods.map(mod => {
+              const mainFile = mod.versions && mod.versions.length > 0 ? mod.versions[0] : null;
+              return `
+                <div class="admin-pending-item" data-id="${mod.id}">
+                  <div class="admin-pending-item-main">
+                    <div class="admin-pending-icon" style="background-color: ${mod.iconColor || '#10b981'}">
+                      ${renderAvatar(mod.avatar)}
+                    </div>
+                    <div class="admin-pending-info">
+                      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                        <h3 class="admin-pending-title">${mod.name}</h3>
+                        <span class="result-badge-type">${METADATA.types[mod.type] || mod.type}</span>
+                      </div>
+                      <p class="admin-pending-author">Автор: <strong>${mod.author}</strong>${getAuthorBadgeHTML(mod.author)}</p>
+                      <p class="admin-pending-desc">${mod.shortDescription}</p>
+                      
+                      ${mainFile ? `
+                        <div class="admin-file-details">
+                          <i class="fa-solid fa-paperclip"></i>
+                          <span>Файл: <strong>${mainFile.filename}</strong> (${mainFile.fileSize})</span>
+                        </div>
+                      ` : ''}
+                    </div>
+                  </div>
+                  
+                  <div class="admin-pending-actions">
+                    ${mainFile ? `
+                      <button class="btn btn-secondary btn-sm btn-download-pending" data-id="${mod.id}" title="Скачать файл для проверки">
+                        <i class="fa-solid fa-download"></i> Скачать файл
+                      </button>
+                    ` : ''}
+                    <div style="display:flex; gap:8px;">
+                      <button class="btn btn-primary btn-sm btn-approve-pending" data-id="${mod.id}" style="background-color: var(--primary-color); flex:1; justify-content:center;">
+                        <i class="fa-solid fa-check"></i> Одобрить
+                      </button>
+                      <button class="btn btn-secondary btn-sm btn-reject-pending" data-id="${mod.id}" style="border-color:#ef4444; color:#ef4444; flex:1; justify-content:center;">
+                        <i class="fa-solid fa-xmark"></i> Отклонить
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              `;
+            }).join("")}
+          </div>
+        `}
+      </div>
+
+      <!-- Users Management Tab Content -->
+      <div class="admin-tab-content" id="admin-content-users" style="display:none;">
+        <div class="admin-users-table-container">
+          <table class="admin-users-table">
+            <thead>
+              <tr>
+                <th>Пользователь</th>
+                <th>UID</th>
+                <th>Email</th>
+                <th>Роль</th>
+                <th>Действия (Изменить роль)</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${users.map(user => {
+                const isSelf = currentUser && currentUser.uid === user.uid;
+                const isOwner = user.role === 'OWNER';
+                return `
+                  <tr>
+                    <td>
+                      <div style="display:flex; align-items:center; gap:8px;">
+                        <img src="${user.avatar || 'https://api.dicebear.com/7.x/pixel-art/svg?seed=' + user.username}" alt="Avatar" class="user-avatar" style="width:28px; height:28px;">
+                        <strong>${user.username}</strong>
+                      </div>
+                    </td>
+                    <td><code style="color:var(--text-muted); font-size:12px;">${user.uid || 'MS-XXXXX'}</code></td>
+                    <td>${user.email}</td>
+                    <td>${getRoleBadgeHTML(user.role)}</td>
+                    <td>
+                      ${isSelf ? `
+                        <span style="font-size:12px; color:var(--text-muted);">Вы сами (нельзя изменить)</span>
+                      ` : (isOwner && currentUser.role !== 'OWNER') ? `
+                        <span style="font-size:12px; color:var(--text-muted);">Владелец (нельзя изменить)</span>
+                      ` : `
+                        <select class="admin-role-select" data-uid="${user.uid}" style="background:var(--bg-color); border:1px solid var(--border-color); color:var(--text-primary); padding:4px 8px; border-radius:var(--radius-sm); font-size:13px; cursor:pointer;">
+                          <option value="PLAYER" ${user.role === 'PLAYER' ? 'selected' : ''}>Игрок (PLAYER)</option>
+                          <option value="ADMIN" ${user.role === 'ADMIN' ? 'selected' : ''}>Администратор (ADMIN)</option>
+                          <option value="OWNER" ${user.role === 'OWNER' ? 'selected' : ''}>Владелец (OWNER)</option>
+                        </select>
+                      `}
+                    </td>
+                  </tr>
+                `;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // --- TAB SWITCHING EVENTS ---
+  const modsBtn = document.getElementById("admin-tab-mods-btn");
+  const usersBtn = document.getElementById("admin-tab-users-btn");
+  const modsPanel = document.getElementById("admin-content-mods");
+  const usersPanel = document.getElementById("admin-content-users");
+
+  modsBtn.addEventListener("click", () => {
+    modsBtn.classList.add("active");
+    usersBtn.classList.remove("active");
+    modsPanel.style.display = "block";
+    usersPanel.style.display = "none";
+  });
+
+  usersBtn.addEventListener("click", () => {
+    usersBtn.classList.add("active");
+    modsBtn.classList.remove("active");
+    usersPanel.style.display = "block";
+    modsPanel.style.display = "none";
+  });
+
+  // --- ACTIONS: MODERATION EVENTS ---
+  
+  // Download button
+  document.querySelectorAll(".btn-download-pending").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const modId = btn.getAttribute("data-id");
+      const currentMods = getMods();
+      const modObj = currentMods.find(m => m.id === modId);
+      if (modObj && modObj.versions && modObj.versions.length > 0) {
+        triggerVersionDownload(modObj, modObj.versions[0]);
+      }
+    });
+  });
+
+  // Approve button
+  document.querySelectorAll(".btn-approve-pending").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const modId = btn.getAttribute("data-id");
+      approvePendingMod(modId);
+    });
+  });
+
+  // Reject button
+  document.querySelectorAll(".btn-reject-pending").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const modId = btn.getAttribute("data-id");
+      rejectPendingMod(modId);
+    });
+  });
+
+  // --- ACTIONS: ROLE MANAGEMENT ---
+  document.querySelectorAll(".admin-role-select").forEach(select => {
+    select.addEventListener("change", (e) => {
+      const uid = select.getAttribute("data-uid");
+      const newRole = e.target.value;
+      changeUserRole(uid, newRole);
+    });
+  });
+}
+
+function approvePendingMod(modId) {
+  const currentMods = getMods();
+  const mod = currentMods.find(m => m.id === modId);
+  if (mod) {
+    mod.approved = true;
+    mod.updatedAt = new Date().toISOString();
+    localStorage.setItem("mods_data", JSON.stringify(currentMods));
+    showToast(`Проект "${mod.name}" успешно одобрен и опубликован!`, "success");
+    renderAdminPanel();
+  }
+}
+
+function rejectPendingMod(modId) {
+  let currentMods = getMods();
+  const mod = currentMods.find(m => m.id === modId);
+  if (mod) {
+    currentMods = currentMods.filter(m => m.id !== modId);
+    localStorage.setItem("mods_data", JSON.stringify(currentMods));
+    showToast(`Проект "${mod.name}" отклонен и удален.`, "info");
+    renderAdminPanel();
+  }
+}
+
+function changeUserRole(uid, newRole) {
+  const registeredUsers = JSON.parse(localStorage.getItem("registered_users") || "[]");
+  const user = registeredUsers.find(u => u.uid === uid);
+  if (user) {
+    const oldRole = user.role;
+    user.role = newRole;
+    localStorage.setItem("registered_users", JSON.stringify(registeredUsers));
+    
+    // Update current user locally if editing self
+    const currentUser = JSON.parse(localStorage.getItem("current_user"));
+    if (currentUser && currentUser.uid === uid) {
+      currentUser.role = newRole;
+      localStorage.setItem("current_user", JSON.stringify(currentUser));
+      renderUserAuth();
+    }
+    
+    showToast(`Роль пользователя ${user.username} изменена с ${oldRole} на ${newRole}`, "success");
+    renderAdminPanel();
+  }
 }

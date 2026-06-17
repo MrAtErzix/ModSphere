@@ -1,5 +1,6 @@
 // Mock database of mods for our platform (ModSphere)
-const INITIAL_MODS = [
+const INITIAL_MODS = [];
+const DUMMY_MODS = [
   {
     id: "sodium",
     name: "Sodium",
@@ -397,7 +398,7 @@ const INITIAL_MODS = [
   }
 ];
 
-const DB_VERSION = "v2";
+const DB_VERSION = "v3";
 
 // Helper to load/save custom mods from LocalStorage so the user can interactively create new ones
 function getMods() {
@@ -422,19 +423,21 @@ function saveMod(newMod) {
   const nowStr = new Date().toISOString();
   newMod.createdAt = nowStr;
   newMod.updatedAt = nowStr;
+  newMod.approved = newMod.approved !== undefined ? newMod.approved : false;
   
-  // Create first version package for the user mod
+  // Create first version package for the user mod using the uploaded file
   newMod.versions = [
     {
       id: `${newMod.id}-v1`,
       versionNumber: "1.0.0",
       name: `${newMod.name} v1.0.0`,
       type: "release",
-      changelog: "Initial release on ModSphere!",
+      changelog: "Первая публикация проекта на ModSphere!",
       gameVersions: newMod.gameVersions || ["1.20.4"],
       loaders: newMod.loaders || ["fabric"],
-      filename: `${newMod.id}-1.0.0.jar`,
-      fileSize: "450 KB",
+      filename: newMod.filename || `${newMod.id}-1.0.0.jar`,
+      fileSize: newMod.fileSize || "450 KB",
+      fileData: newMod.fileData || "",
       downloads: 0,
       uploadedAt: nowStr
     }

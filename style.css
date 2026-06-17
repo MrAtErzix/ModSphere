@@ -2680,4 +2680,272 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 
+/* --- ROLE BADGES (SEMI-TRANSPARENT RECTANGULAR BACKGROUND) --- */
+.role-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: #ffffff !important;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  margin-left: 6px;
+  vertical-align: middle;
+  line-height: 1.2;
+}
+
+.role-badge.role-admin {
+  background: rgba(239, 68, 68, 0.2) !important; /* Semi-transparent Red */
+  border: 1.5px solid rgba(239, 68, 68, 0.4) !important;
+}
+
+.role-badge.role-owner {
+  background: rgba(139, 92, 246, 0.2) !important; /* Semi-transparent Purple */
+  border: 1.5px solid rgba(139, 92, 246, 0.4) !important;
+}
+
+.role-badge.role-player {
+  background: rgba(156, 163, 175, 0.15) !important; /* Semi-transparent Gray */
+  border: 1.5px solid rgba(156, 163, 175, 0.3) !important;
+}
+
+/* --- ADMIN PANEL SYSTEM --- */
+.admin-panel-container {
+  max-width: var(--max-width);
+  margin: 0 auto 56px auto;
+  padding: 0 16px;
+  animation: fadeIn var(--transition-normal) ease-out;
+}
+
+.admin-panel-header {
+  margin-bottom: 32px;
+}
+
+.admin-panel-header h2 {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.admin-panel-header p {
+  color: var(--text-secondary);
+  font-size: 15px;
+}
+
+.admin-tabs {
+  display: flex;
+  gap: 12px;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 1px;
+  margin-bottom: 24px;
+}
+
+.admin-tab-btn {
+  padding: 12px 20px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  position: relative;
+  transition: color var(--transition-fast), background var(--transition-fast);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-tab-btn:hover {
+  color: var(--text-primary);
+  background: var(--surface-hover);
+}
+
+.admin-tab-btn.active {
+  color: var(--primary-color);
+}
+
+.admin-tab-btn.active::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--primary-color);
+}
+
+/* Pending mods moderation styles */
+.admin-pending-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.admin-pending-item {
+  background: var(--surface-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+  transition: transform var(--transition-normal), border-color var(--transition-normal);
+}
+
+.admin-pending-item:hover {
+  border-color: rgba(16, 185, 129, 0.2);
+}
+
+.admin-pending-item-main {
+  display: flex;
+  gap: 20px;
+  flex: 1;
+}
+
+.admin-pending-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  color: white;
+  flex-shrink: 0;
+}
+
+.admin-pending-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.admin-pending-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.admin-pending-author {
+  font-size: 13px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+}
+
+.admin-pending-desc {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.admin-file-details {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 6px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 6px;
+  align-self: flex-start;
+}
+
+.admin-file-details i {
+  color: var(--primary-color);
+}
+
+.admin-pending-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 200px;
+  flex-shrink: 0;
+}
+
+.admin-pending-actions .btn {
+  width: 100%;
+}
+
+/* User management styles */
+.admin-users-table-container {
+  background: var(--surface-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  box-shadow: var(--shadow-sm);
+}
+
+.admin-users-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 14px;
+}
+
+.admin-users-table th,
+.admin-users-table td {
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.admin-users-table th {
+  background: rgba(0, 0, 0, 0.15);
+  color: var(--text-secondary);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+}
+
+.admin-users-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.admin-users-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.01);
+}
+
+/* Admin responsive layout */
+@media (max-width: 992px) {
+  .admin-pending-item {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 20px;
+  }
+  .admin-pending-actions {
+    min-width: 0;
+    width: 100%;
+  }
+}
+
+@media (max-width: 768px) {
+  .admin-panel-header h2 {
+    font-size: 22px;
+  }
+  .admin-tab-btn {
+    font-size: 13px;
+    padding: 10px 12px;
+    flex: 1;
+    justify-content: center;
+  }
+  .admin-pending-item-main {
+    flex-direction: column;
+    gap: 14px;
+  }
+}
+
+
 
