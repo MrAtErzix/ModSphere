@@ -5,8 +5,8 @@ import sys
 import json
 from datetime import datetime
 
-PORT = 8080
-DB_FILE = 'db.json'
+PORT = int(os.environ.get("PORT", "8080"))
+DB_FILE = os.environ.get("DB_FILE", 'db.json')
 
 
 def load_db():
@@ -160,15 +160,21 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
 script_dir = os.path.dirname(os.path.abspath(__file__))
 os.chdir(script_dir)
 
+host = os.environ.get("HOST", "0.0.0.0")
+is_render = "RENDER" in os.environ or "PORT" in os.environ
+
 print("=" * 60)
-print("             ModSphere Local Dev Server")
+if is_render:
+    print("            ModSphere Server (Render)")
+else:
+    print("            ModSphere Local Dev Server")
 print("=" * 60)
-print(f" Адрес сайта:   http://localhost:{PORT}")
+print(f" Адрес сайта:   http://{host}:{PORT}")
 print(" Для выхода:    Нажмите Ctrl + C")
 print("=" * 60)
 
 try:
-    with socketserver.TCPServer(("", PORT), MyHandler) as httpd:
+    with socketserver.TCPServer((host, PORT), MyHandler) as httpd:
         httpd.serve_forever()
 except KeyboardInterrupt:
     print("\n[!] Сервер остановлен пользователем.")
