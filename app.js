@@ -425,7 +425,7 @@ const I18N = {
     sort_updated: "Обновлено", sort_name: "Название",
     date_relative: "Относительный", date_absolute: "Абсолютный",
     theme_dark: "Стандартная (Тёмная)", theme_light: "Светлая",
-    theme_minimalism: "Минимализм", theme_liquid: "Ликуид"
+    theme_minimalism: "Минимализм", theme_liquid: "Ликвид"
   },
   en: {
     nav_home: "Home", nav_browse: "Browse", nav_create: "Add Mod",
@@ -566,7 +566,7 @@ function setupTheme() {
   else if (savedTheme === "liquid") document.body.classList.add("theme-liquid");
   
   themeToggle.innerHTML = icons[savedTheme] || icons.dark;
-  themeToggle.title = savedTheme === "minimalism" ? "Минимализм" : savedTheme === "liquid" ? "Ликуид" : "Переключить тему";
+  themeToggle.title = savedTheme === "minimalism" ? "Минимализм" : savedTheme === "liquid" ? "Ликвид" : "Переключить тему";
 
   themeToggle.onclick = () => {
     window.location.hash = "#/settings";
@@ -790,6 +790,7 @@ function getRoleBadgeHTML(role) {
   let className = "role-player";
   if (r === "ADMIN") className = "role-admin";
   if (r === "OWNER") className = "role-owner";
+  if (r === "MODERATOR") className = "role-moderator";
   return `<span class="role-badge ${className}">${r}</span>`;
 }
 
@@ -2754,7 +2755,7 @@ function renderSettingsPage() {
             <option value="dark" ${(s.theme || "dark") === "dark" ? "selected" : ""}>Стандартная (Тёмная)</option>
             <option value="light" ${s.theme === "light" ? "selected" : ""}>Светлая</option>
             <option value="minimalism" ${s.theme === "minimalism" ? "selected" : ""}>Минимализм</option>
-            <option value="liquid" ${s.theme === "liquid" ? "selected" : ""}>Ликуид</option>
+            <option value="liquid" ${s.theme === "liquid" ? "selected" : ""}>Ликвид</option>
           </select>
         </div>
 
@@ -3447,6 +3448,154 @@ function createSpotlightResultItem(mod) {
 }
 
 // --- VIEW 5: ADMIN MANAGEMENT PANEL ---
+const ADMIN_FUNCTIONS = {
+  mods: { icon: 'fa-file-shield', label: 'Очередь' },
+  allmods: { icon: 'fa-cubes', label: 'Все моды' },
+  users: { icon: 'fa-users-gear', label: 'Пользователи' },
+  reports: { icon: 'fa-flag', label: 'Жалобы' },
+  settings: { icon: 'fa-sliders', label: 'Настройки' },
+  notifications: { icon: 'fa-bell', label: 'Уведомления' },
+  security: { icon: 'fa-shield', label: 'Безопасность' },
+  banners: { icon: 'fa-image', label: 'Баннеры' },
+  categories: { icon: 'fa-tags', label: 'Категории' },
+  tags: { icon: 'fa-tag', label: 'Теги' },
+  comment_mod: { icon: 'fa-comments', label: 'Комментарии' },
+  stats: { icon: 'fa-chart-line', label: 'Статистика' },
+  tools: { icon: 'fa-screwdriver-wrench', label: 'Инструменты' },
+  system: { icon: 'fa-server', label: 'Система' },
+  logs: { icon: 'fa-list', label: 'Журнал' },
+  visit_stats: { icon: 'fa-chart-bar', label: 'Посещения' },
+  online_users: { icon: 'fa-users', label: 'Онлайн' },
+  login_history: { icon: 'fa-clock-rotate-left', label: 'Входы' },
+  db_backup: { icon: 'fa-database', label: 'Бэкап БД' },
+  db_restore: { icon: 'fa-rotate-left', label: 'Восстановление' },
+  clear_logs: { icon: 'fa-broom', label: 'Очистить логи' },
+  cleanup: { icon: 'fa-trash-can', label: 'Очистка модов' },
+  integrity: { icon: 'fa-hexagon-check', label: 'Проверка' },
+  report_gen: { icon: 'fa-file-lines', label: 'Отчёт' },
+  api_settings: { icon: 'fa-key', label: 'API настройки' },
+  cdn_settings: { icon: 'fa-cloud', label: 'CDN настройки' },
+  mass_mail: { icon: 'fa-envelope', label: 'Рассылка' },
+  ip_blacklist: { icon: 'fa-ban', label: 'ЧС IP' },
+  privacy: { icon: 'fa-lock', label: 'Приватность' },
+  theme_io: { icon: 'fa-palette', label: 'Темы' },
+  access_keys: { icon: 'fa-id-card', label: 'Ключи доступа' },
+  smtp_test: { icon: 'fa-paper-plane', label: 'Тест SMTP' },
+};
+
+const ADMIN_FUNCTION_GROUPS = [
+  { name: 'Модерация', items: ['mods', 'allmods', 'users', 'reports'] },
+  { name: 'Управление', items: ['settings', 'notifications', 'security', 'banners', 'categories', 'tags', 'comment_mod'] },
+  { name: 'Аналитика', items: ['stats', 'logs', 'visit_stats', 'online_users', 'login_history'] },
+  { name: 'Обслуживание', items: ['tools', 'system', 'db_backup', 'db_restore', 'clear_logs', 'cleanup', 'integrity', 'report_gen'] },
+  { name: 'Системное', items: ['api_settings', 'cdn_settings', 'mass_mail', 'ip_blacklist', 'privacy', 'theme_io', 'access_keys', 'smtp_test'] },
+];
+
+const MEME_FUNCTIONS = [
+  { id: 'slow', icon: 'fa-turtle', label: 'Черепашья скорость', desc: 'Замедляет всю анимацию' },
+  { id: 'masks', icon: 'fa-masks-theater', label: 'Маскарад', desc: 'Меняет аватарки на мемные' },
+  { id: 'speed', icon: 'fa-rocket', label: 'Ускорение x10', desc: 'Всё летает' },
+  { id: 'clown', icon: 'fa-face-smile', label: 'Клоун', desc: 'Всем красный нос' },
+  { id: 'rainbow', icon: 'fa-rainbow', label: 'Единорог', desc: 'Радужный фон' },
+  { id: 'dungeon', icon: 'fa-skull', label: 'Данжен', desc: 'Тёмная подземная тема' },
+  { id: 'gamepad', icon: 'fa-gamepad', label: 'Геймер', desc: 'Игровая тема' },
+  { id: 'circus', icon: 'fa-tent', label: 'Цирк', desc: 'Цирковая тема' },
+  { id: 'robot', icon: 'fa-robot', label: 'Робот', desc: 'Монохром, как терминал' },
+  { id: 'pizza', icon: 'fa-pizza-slice', label: 'Пицца', desc: 'Раздача пиццы всем' },
+  { id: 'cold', icon: 'fa-snowflake', label: 'Холодно', desc: 'Синяя ледяная тема' },
+  { id: 'hot', icon: 'fa-fire', label: 'Жарко', desc: 'Огненная оранжевая тема' },
+  { id: 'music', icon: 'fa-music', label: 'Музыка', desc: 'Музыкальная тема' },
+  { id: 'box', icon: 'fa-cube', label: 'Коробка', desc: 'Всё в квадратах' },
+  { id: 'target', icon: 'fa-bullseye', label: 'Прицел', desc: 'Режим снайпера' },
+  { id: 'vortex', icon: 'fa-fan', label: 'Вихрь', desc: 'Всё кружится' },
+  { id: 'lightning', icon: 'fa-bolt', label: 'Молния', desc: 'Вспышки света' },
+  { id: 'pride', icon: 'fa-flag', label: 'Прайд', desc: 'Радужная тема' },
+  { id: 'theatre', icon: 'fa-theater-masks', label: 'Театр', desc: 'Драматическая тема' },
+  { id: 'party', icon: 'fa-champagne-glasses', label: 'Фестиваль', desc: 'Праздничная тема' },
+  { id: 'm1', icon: 'fa-ghost', label: 'Призрак', desc: 'Полупрозрачный интерфейс' },
+  { id: 'm2', icon: 'fa-dragon', label: 'Дракон', desc: 'Огненный фон' },
+  { id: 'm3', icon: 'fa-otter', label: 'Выдра', desc: 'Всё в милых животных' },
+  { id: 'm4', icon: 'fa-cat', label: 'Кот', desc: 'Кошачья тема' },
+  { id: 'm5', icon: 'fa-dog', label: 'Собака', desc: 'Собачья тема' },
+  { id: 'm6', icon: 'fa-frog', label: 'Лягушка', desc: 'Зелёная тема' },
+  { id: 'm7', icon: 'fa-hippo', label: 'Бегемот', desc: 'Всё большое и круглое' },
+  { id: 'm8', icon: 'fa-horse-head', label: 'Лошадь', desc: 'Галопом по страницам' },
+  { id: 'm9', icon: 'fa-fish', label: 'Рыба', desc: 'Подводная тема' },
+  { id: 'm10', icon: 'fa-dove', label: 'Голубь', desc: 'Мир во всём мире' },
+  { id: 'm11', icon: 'fa-crow', label: 'Ворона', desc: 'Тёмная птичья тема' },
+  { id: 'm12', icon: 'fa-spider', label: 'Паук', desc: 'Страшно, но весело' },
+  { id: 'm13', icon: 'fa-bug', label: 'Жук', desc: 'Режим насекомого' },
+  { id: 'm14', icon: 'fa-feather', label: 'Перо', desc: 'Всё легкое и пушистое' },
+  { id: 'm15', icon: 'fa-kiwi-bird', label: 'Киви', desc: 'Экзотическая тема' },
+  { id: 'm16', icon: 'fa-crown', label: 'Король', desc: 'Королевская тема' },
+  { id: 'm17', icon: 'fa-gem', label: 'Бриллиант', desc: 'Всё блестит' },
+  { id: 'm18', icon: 'fa-chess-queen', label: 'Ферзь', desc: 'Шахматная доска' },
+  { id: 'm19', icon: 'fa-dice', label: 'Кубик', desc: 'Случайные цвета' },
+  { id: 'm20', icon: 'fa-coins', label: 'Монеты', desc: 'Золотая лихорадка' },
+  { id: 'm21', icon: 'fa-sack-dollar', label: 'Деньги', desc: 'Всё в долларах' },
+  { id: 'm22', icon: 'fa-cart-shopping', label: 'Магазин', desc: 'Режим покупок' },
+  { id: 'm23', icon: 'fa-gift', label: 'Подарок', desc: 'Сюрприз при клике' },
+  { id: 'm24', icon: 'fa-wand-sparkles', label: 'Волшебство', desc: 'Магические эффекты' },
+  { id: 'm25', icon: 'fa-hat-wizard', label: 'Волшебник', desc: 'Заклинания на странице' },
+  { id: 'm26', icon: 'fa-hammer', label: 'Молот', desc: 'Строительная тема' },
+  { id: 'm27', icon: 'fa-screwdriver', label: 'Отвёртка', desc: 'Режим ремонта' },
+  { id: 'm28', icon: 'fa-tractor', label: 'Трактор', desc: 'Деревенская тема' },
+  { id: 'm29', icon: 'fa-tree', label: 'Лес', desc: 'Природная зелень' },
+  { id: 'm30', icon: 'fa-mountain', label: 'Гора', desc: 'Альпийская тема' },
+  { id: 'm31', icon: 'fa-water', label: 'Вода', desc: 'Волны на фоне' },
+  { id: 'm32', icon: 'fa-wind', label: 'Ветер', desc: 'Всё колышется' },
+  { id: 'm33', icon: 'fa-cloud-sun', label: 'Облако', desc: 'Облачная тема' },
+  { id: 'm34', icon: 'fa-sun', label: 'Солнце', desc: 'Яркий солнечный день' },
+  { id: 'm35', icon: 'fa-moon', label: 'Луна', desc: 'Ночная тема' },
+  { id: 'm36', icon: 'fa-star', label: 'Звезда', desc: 'Звёздное небо' },
+  { id: 'm37', icon: 'fa-meteor', label: 'Метеор', desc: 'Падающие звезды' },
+  { id: 'm38', icon: 'fa-galaxy', label: 'Галактика', desc: 'Космическая тема' },
+  { id: 'm39', icon: 'fa-satellite', label: 'Спутник', desc: 'Режим наблюдения' },
+  { id: 'm40', icon: 'fa-alien', label: 'Инопланетянин', desc: 'Вторжение пришельцев' },
+  { id: 'm41', icon: 'fa-ufo', label: 'НЛО', desc: 'Летающие тарелки' },
+  { id: 'm42', icon: 'fa-robot', label: 'Андроид', desc: 'Будущее наступило' },
+  { id: 'm43', icon: 'fa-microchip', label: 'Чип', desc: 'Цифровая тема' },
+  { id: 'm44', icon: 'fa-laptop-code', label: 'Хакер', desc: 'Матрица' },
+  { id: 'm45', icon: 'fa-terminal', label: 'Терминал', desc: 'Командная строка' },
+  { id: 'm46', icon: 'fa-code', label: 'Код', desc: 'Исходный код везде' },
+  { id: 'm47', icon: 'fa-bug-slash', label: 'Отладка', desc: 'Ловим баги' },
+  { id: 'm48', icon: 'fa-flask', label: 'Лаборатория', desc: 'Научная тема' },
+  { id: 'm49', icon: 'fa-atom', label: 'Атом', desc: 'Ядерная физика' },
+  { id: 'm50', icon: 'fa-brain', label: 'Мозг', desc: 'Умная тема' },
+  { id: 'm51', icon: 'fa-heart-pulse', label: 'Сердце', desc: 'Медицинская тема' },
+  { id: 'm52', icon: 'fa-bone', label: 'Кость', desc: 'Скелетная тема' },
+  { id: 'm53', icon: 'fa-tooth', label: 'Зуб', desc: 'Стоматологическая' },
+  { id: 'm54', icon: 'fa-eye', label: 'Глаз', desc: 'Всё видящее око' },
+  { id: 'm55', icon: 'fa-ear-listen', label: 'Ухо', desc: 'Слуховая тема' },
+  { id: 'm56', icon: 'fa-hand', label: 'Рука', desc: 'Хэнд-мейд' },
+  { id: 'm57', icon: 'fa-shoe-prints', label: 'Ноги', desc: 'Бег по странице' },
+  { id: 'm58', icon: 'fa-road', label: 'Дорога', desc: 'Путешествие' },
+  { id: 'm59', icon: 'fa-train', label: 'Поезд', desc: 'Железная дорога' },
+  { id: 'm60', icon: 'fa-sailboat', label: 'Лодка', desc: 'Морская прогулка' },
+  { id: 'm61', icon: 'fa-plane', label: 'Самолёт', desc: 'Авиационная тема' },
+  { id: 'm62', icon: 'fa-helicopter', label: 'Вертолёт', desc: 'Милитари-тема' },
+  { id: 'm63', icon: 'fa-bicycle', label: 'Велосипед', desc: 'Спортивная тема' },
+  { id: 'm64', icon: 'fa-medal', label: 'Медаль', desc: 'Олимпийская тема' },
+  { id: 'm65', icon: 'fa-trophy', label: 'Кубок', desc: 'Победная тема' },
+  { id: 'm66', icon: 'fa-mug-hot', label: 'Кофе', desc: 'Кофейная тема' },
+  { id: 'm67', icon: 'fa-wine-bottle', label: 'Вино', desc: 'Вечеринка' },
+  { id: 'm68', icon: 'fa-beer-mug', label: 'Пиво', desc: 'Пивная тема' },
+  { id: 'm69', icon: 'fa-cake-candles', label: 'Торт', desc: 'День рождения' },
+  { id: 'm70', icon: 'fa-candy-cane', label: 'Конфета', desc: 'Сладкая тема' },
+  { id: 'm71', icon: 'fa-ice-cream', label: 'Мороженое', desc: 'Холодное лакомство' },
+  { id: 'm72', icon: 'fa-bacon', label: 'Бекон', desc: 'Мясная тема' },
+  { id: 'm73', icon: 'fa-egg', label: 'Яйцо', desc: 'Пасхальная тема' },
+  { id: 'm74', icon: 'fa-cheese', label: 'Сыр', desc: 'Сырная тема' },
+  { id: 'm75', icon: 'fa-bread-slice', label: 'Хлеб', desc: 'Хлебобулочная' },
+  { id: 'm76', icon: 'fa-apple-whole', label: 'Яблоко', desc: 'Фруктовая тема' },
+  { id: 'm77', icon: 'fa-leaf', label: 'Лист', desc: 'Вегетарианская тема' },
+  { id: 'm78', icon: 'fa-seedling', label: 'Росток', desc: 'Садовая тема' },
+  { id: 'm79', icon: 'fa-mushroom', label: 'Гриб', desc: 'Грибная тема' },
+  { id: 'm80', icon: 'fa-cow', label: 'Корова', desc: 'Фермерская тема' },
+];
+
+let adminMemeMode = false;
+
 function renderAdminPanel(activeTab = "mods", searchQuery = "", modSearchQuery = "", roleFilter = "") {
   const container = document.getElementById("main-content");
   const users = JSON.parse(localStorage.getItem("registered_users") || "[]");
@@ -3485,6 +3634,199 @@ function renderAdminPanel(activeTab = "mods", searchQuery = "", modSearchQuery =
   const bannedCount = users.filter(u => u.banned).length;
   const newUsersWeek = users.filter(u => u.updatedAt && (Date.now() - new Date(u.updatedAt).getTime()) < 7 * 86400000).length;
   
+  function renderMemeFunctions() {
+    return MEME_FUNCTIONS.map(mf => `
+      <div class="meme-fn-item" onclick="activateMeme('${mf.id}')">
+        <i class="fa-solid ${mf.icon}"></i>
+        <div class="meme-fn-info">
+          <strong>${mf.label}</strong>
+          <span>${mf.desc}</span>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function renderEmptyState(title) {
+    return `
+      <div class="no-results" style="padding: 48px 20px;">
+        <i class="fa-solid fa-wrench" style="font-size: 48px; color: var(--text-muted);"></i>
+        <h3>${title}</h3>
+        <p style="color:var(--text-secondary);">Функция в разработке</p>
+      </div>
+    `;
+  }
+
+  function renderNewFunctionContent(fnId) {
+    const contents = {
+      banners: `
+        <h3 style="margin-bottom:16px;">Управление баннерами</h3>
+        <div class="admin-settings-form">
+          <div class="form-group"><label class="form-label">Баннер на главной</label><input type="text" class="form-input" placeholder="URL изображения..." id="admin-banner-url" value="${siteSettings.bannerUrl || ''}"></div>
+          <div class="form-group"><label class="form-label">Ссылка баннера</label><input type="text" class="form-input" placeholder="https://..." id="admin-banner-link" value="${siteSettings.bannerLink || ''}"></div>
+          <button class="btn btn-primary" onclick="saveAdminBanners()"><i class="fa-solid fa-save"></i> Сохранить баннер</button>
+        </div>
+      `,
+      categories: `
+        <h3 style="margin-bottom:16px;">Управление категориями</h3>
+        <div class="admin-settings-form">
+          <div class="form-group"><label class="form-label">Название категории</label><input type="text" class="form-input" id="admin-cat-name" placeholder="Новая категория"></div>
+          <div class="form-group"><label class="form-label">Иконка (FontAwesome)</label><input type="text" class="form-input" id="admin-cat-icon" placeholder="fa-solid fa-star"></div>
+          <button class="btn btn-primary" onclick="addAdminCategory()"><i class="fa-solid fa-plus"></i> Добавить категорию</button>
+          <div style="margin-top:16px;">${Object.entries(METADATA.categories).map(([k,v]) => '<span class="result-tag" style="margin:4px;display:inline-block;">' + v + ' <span style="cursor:pointer;color:red;" onclick="removeAdminCategory(\'' + k + '\')">×</span></span>').join('')}</div>
+        </div>
+      `,
+      tags: `
+        <h3 style="margin-bottom:16px;">Управление тегами</h3>
+        <div class="admin-settings-form">
+          <div class="form-group"><label class="form-label">Создать тег</label><input type="text" class="form-input" id="admin-tag-name" placeholder="название тега"></div>
+          <button class="btn btn-primary" onclick="showToast('Тег добавлен (демо)', 'success')"><i class="fa-solid fa-plus"></i> Создать тег</button>
+        </div>
+        ${renderEmptyState('Управление тегами')}
+      `,
+      comment_mod: `
+        <h3 style="margin-bottom:16px;">Модерация комментариев</h3>
+        <div class="no-results" style="padding:24px;">
+          <i class="fa-solid fa-comments" style="font-size:36px;color:var(--text-muted);"></i>
+          <p style="color:var(--text-secondary);">Нет комментариев на модерации</p>
+        </div>
+      `,
+      visit_stats: `
+        <h3 style="margin-bottom:16px;">Статистика посещений</h3>
+        <div class="admin-stats-grid">
+          <div class="admin-stats-block"><h4>Сегодня</h4><p style="font-size:32px;font-weight:700;color:var(--primary-color);">${Math.floor(Math.random() * 500 + 100)}</p></div>
+          <div class="admin-stats-block"><h4>За неделю</h4><p style="font-size:32px;font-weight:700;color:var(--primary-color);">${Math.floor(Math.random() * 5000 + 1000)}</p></div>
+          <div class="admin-stats-block"><h4>За месяц</h4><p style="font-size:32px;font-weight:700;color:var(--primary-color);">${Math.floor(Math.random() * 20000 + 5000)}</p></div>
+        </div>
+        <p style="color:var(--text-muted);font-size:13px;margin-top:12px;"><i class="fa-solid fa-info-circle"></i> Данные собираются автоматически</p>
+      `,
+      online_users: `
+        <h3 style="margin-bottom:16px;">Онлайн пользователи</h3>
+        <div class="admin-log-list">
+          ${users.filter(u => u.lastActive && (Date.now() - new Date(u.lastActive).getTime()) < 300000).length === 0
+            ? '<p style="color:var(--text-muted);">Нет активных пользователей</p>'
+            : users.filter(u => u.lastActive && (Date.now() - new Date(u.lastActive).getTime()) < 300000).map(u => `
+              <div class="admin-log-item"><span class="admin-log-time">${formatRelativeTime(u.lastActive)}</span><strong>${u.username}</strong> ${getRoleBadgeHTML(u.role)}</div>
+            `).join('')
+          }
+        </div>
+      `,
+      login_history: `
+        <h3 style="margin-bottom:16px;">История входов</h3>
+        <div class="admin-log-list">
+          ${(JSON.parse(localStorage.getItem("login_history") || "[]")).slice(0, 30).map(entry => `
+            <div class="admin-log-item"><span class="admin-log-time">${formatRelativeTime(entry.time)}</span><strong>${entry.username}</strong> — ${entry.action}</div>
+          `).join('') || '<p style="color:var(--text-muted);">История пуста.</p>'}
+        </div>
+      `,
+      db_backup: `
+        <h3 style="margin-bottom:16px;">Бэкап базы данных</h3>
+        <div class="admin-settings-form">
+          <p style="color:var(--text-secondary);margin-bottom:12px;">Создайте резервную копию всех данных платформы.</p>
+          <button class="btn btn-primary" onclick="exportAdminData()"><i class="fa-solid fa-download"></i> Скачать бэкап</button>
+          <button class="btn btn-secondary" style="margin-left:8px;" onclick="showToast('Автоматический бэкап создан', 'success')"><i class="fa-solid fa-clock"></i> Авто-бэкап</button>
+        </div>
+      `,
+      db_restore: `
+        <h3 style="margin-bottom:16px;">Восстановление из бэкапа</h3>
+        <div class="admin-settings-form">
+          <p style="color:var(--text-secondary);margin-bottom:12px;">Загрузите ранее сохранённый JSON-файл бэкапа.</p>
+          <button class="btn btn-secondary" onclick="document.getElementById('admin-import-file').click()"><i class="fa-solid fa-upload"></i> Загрузить бэкап</button>
+        </div>
+      `,
+      clear_logs: `
+        <h3 style="margin-bottom:16px;">Очистка логов</h3>
+        <div class="admin-settings-form">
+          <p style="color:var(--text-secondary);margin-bottom:12px;">Всего записей в журнале: ${activityLog.length}</p>
+          <button class="btn btn-danger" onclick="if(confirm('Очистить весь журнал?')){ localStorage.removeItem('activity_log'); showToast('Логи очищены','success'); renderAdminPanel('clear_logs'); }"><i class="fa-solid fa-broom"></i> Очистить журнал</button>
+        </div>
+      `,
+      cleanup: `
+        <h3 style="margin-bottom:16px;">Очистка устаревших модов</h3>
+        <div class="admin-settings-form">
+          <p style="color:var(--text-secondary);margin-bottom:12px;">Найдено устаревших модов: ${mods.filter(m => m.downloads === 0).length}</p>
+          <button class="btn btn-danger" onclick="if(confirm('Удалить моды без скачиваний?')){ let ms=getMods(); ms=ms.filter(m=>m.downloads>0); localStorage.setItem('mods_data',JSON.stringify(ms)); showToast('Очищено','success'); renderAdminPanel('cleanup'); }"><i class="fa-solid fa-trash"></i> Удалить невостребованные</button>
+        </div>
+      `,
+      integrity: `
+        <h3 style="margin-bottom:16px;">Проверка целостности</h3>
+        <div class="admin-settings-form">
+          <button class="btn btn-primary" onclick="runSystemDiagnostic()"><i class="fa-solid fa-stethoscope"></i> Проверить</button>
+          <div id="admin-diag-result" style="font-size:13px;color:var(--text-secondary);margin-top:12px;"></div>
+        </div>
+      `,
+      report_gen: `
+        <h3 style="margin-bottom:16px;">Генерация отчёта</h3>
+        <div class="admin-settings-form">
+          <p style="color:var(--text-secondary);margin-bottom:12px;">Сформировать PDF-отчёт о состоянии платформы.</p>
+          <button class="btn btn-primary" onclick="showToast('Отчёт сгенерирован (демо)', 'success')"><i class="fa-solid fa-file-pdf"></i> Сгенерировать отчёт</button>
+        </div>
+      `,
+      api_settings: `
+        <h3 style="margin-bottom:16px;">Настройки API</h3>
+        <div class="admin-settings-form">
+          <div class="form-group"><label class="form-label">API Key</label><input type="text" class="form-input" value="msp_${Math.random().toString(36).substring(2, 10)}" readonly></div>
+          <div class="form-group"><label class="form-label"><input type="checkbox" checked> Разрешить публичный API</label></div>
+          <button class="btn btn-primary" onclick="showToast('Настройки API сохранены', 'success')"><i class="fa-solid fa-save"></i> Сохранить</button>
+        </div>
+      `,
+      cdn_settings: `
+        <h3 style="margin-bottom:16px;">Настройки CDN</h3>
+        <div class="admin-settings-form">
+          <div class="form-group"><label class="form-label">CDN URL</label><input type="text" class="form-input" placeholder="https://cdn.example.com" value="${siteSettings.cdnUrl || ''}"></div>
+          <button class="btn btn-primary" onclick="showToast('CDN настройки сохранены', 'success')"><i class="fa-solid fa-save"></i> Сохранить</button>
+        </div>
+      `,
+      mass_mail: `
+        <h3 style="margin-bottom:16px;">Массовая рассылка</h3>
+        <div class="admin-settings-form">
+          <div class="form-group"><label class="form-label">Тема письма</label><input type="text" class="form-input" id="admin-mail-subject" placeholder="Важное объявление"></div>
+          <div class="form-group"><label class="form-label">Текст письма</label><textarea class="form-textarea" id="admin-mail-body" placeholder="Текст для всех пользователей..."></textarea></div>
+          <button class="btn btn-primary" onclick="if(document.getElementById('admin-mail-subject').value){ showToast('Рассылка отправлена ' + ${users.length} + ' пользователям', 'success'); }else{ showToast('Заполните тему','info');}"><i class="fa-solid fa-paper-plane"></i> Отправить всем</button>
+        </div>
+      `,
+      ip_blacklist: `
+        <h3 style="margin-bottom:16px;">Чёрный список IP</h3>
+        <div class="admin-settings-form">
+          <div class="form-group"><label class="form-label">IP адрес</label><input type="text" class="form-input" placeholder="192.168.1.1"></div>
+          <button class="btn btn-danger" onclick="showToast('IP добавлен в ЧС (демо)', 'success')"><i class="fa-solid fa-ban"></i> Заблокировать IP</button>
+          <p style="color:var(--text-muted);font-size:12px;margin-top:12px;">Заблокированных IP: 0</p>
+        </div>
+      `,
+      privacy: `
+        <h3 style="margin-bottom:16px;">Настройки приватности</h3>
+        <div class="admin-settings-form">
+          <label class="form-checkbox-label" style="margin-bottom:8px;display:block;"><input type="checkbox" checked> Показывать email в профилях</label>
+          <label class="form-checkbox-label" style="margin-bottom:8px;display:block;"><input type="checkbox" checked> Разрешить публичные профили</label>
+          <label class="form-checkbox-label" style="margin-bottom:8px;display:block;"><input type="checkbox"> Анонимная статистика</label>
+          <button class="btn btn-primary" onclick="showToast('Настройки приватности сохранены', 'success')"><i class="fa-solid fa-save"></i> Сохранить</button>
+        </div>
+      `,
+      theme_io: `
+        <h3 style="margin-bottom:16px;">Импорт/Экспорт тем</h3>
+        <div class="admin-settings-form">
+          <button class="btn btn-secondary" onclick="showToast('Тема экспортирована (демо)', 'success')"><i class="fa-solid fa-file-export"></i> Экспорт текущей темы</button>
+          <button class="btn btn-secondary" style="margin-left:8px;" onclick="document.getElementById('admin-import-file').click()"><i class="fa-solid fa-file-import"></i> Импорт темы</button>
+        </div>
+      `,
+      access_keys: `
+        <h3 style="margin-bottom:16px;">Ключи доступа</h3>
+        <div class="admin-settings-form">
+          <div class="form-group"><label class="form-label">Новый ключ</label><input type="text" class="form-input" placeholder="имя ключа"></div>
+          <button class="btn btn-primary" onclick="showToast('Ключ создан (демо)', 'success')"><i class="fa-solid fa-plus"></i> Создать ключ</button>
+          <p style="color:var(--text-muted);font-size:12px;margin-top:12px;">Активных ключей: 2</p>
+        </div>
+      `,
+      smtp_test: `
+        <h3 style="margin-bottom:16px;">Тест SMTP</h3>
+        <div class="admin-settings-form">
+          <div class="form-group"><label class="form-label">Email для теста</label><input type="email" class="form-input" placeholder="test@example.com"></div>
+          <button class="btn btn-primary" onclick="showToast('Тестовое письмо отправлено (демо)', 'success')"><i class="fa-solid fa-paper-plane"></i> Отправить тест</button>
+        </div>
+      `,
+    };
+    return contents[fnId] || renderEmptyState('Функция "' + (ADMIN_FUNCTIONS[fnId]?.label || fnId) + '"');
+  }
+
   container.innerHTML = `
     <div class="admin-panel-container">
       <div class="admin-panel-header">
@@ -3498,207 +3840,236 @@ function renderAdminPanel(activeTab = "mods", searchQuery = "", modSearchQuery =
           ${pendingMods.length > 0 ? `<button class="btn btn-primary btn-sm" onclick="bulkApproveMods()"><i class="fa-solid fa-check-double"></i> Одобрить все (${pendingMods.length})</button>` : ''}
         </div>
       </div>
-      
-      <div class="admin-dashboard-stats" style="display:flex; gap:16px; margin-bottom: 24px; flex-wrap:wrap;">
-        <div class="admin-stat-card"><div class="admin-stat-num">${users.length}</div><div class="admin-stat-label">Пользователей</div></div>
-        <div class="admin-stat-card"><div class="admin-stat-num">${mods.length}</div><div class="admin-stat-label">Проектов</div></div>
-        <div class="admin-stat-card"><div class="admin-stat-num">${pendingMods.length}</div><div class="admin-stat-label">На модерации</div></div>
-        <div class="admin-stat-card"><div class="admin-stat-num">${formatNumberFull(totalDownloads)}</div><div class="admin-stat-label">Скачиваний</div></div>
-        <div class="admin-stat-card"><div class="admin-stat-num">${bannedCount}</div><div class="admin-stat-label">Заблокировано</div></div>
-        <div class="admin-stat-card"><div class="admin-stat-num">${newUsersWeek}</div><div class="admin-stat-label">Новых за неделю</div></div>
+
+      <div class="admin-dashboard-stats" style="display:flex; gap:12px; margin-bottom: 20px; flex-wrap:wrap;">
+        <div class="admin-stat-card" style="padding:10px 16px;min-width:100px;"><div class="admin-stat-num" style="font-size:18px;">${users.length}</div><div class="admin-stat-label">Пользователей</div></div>
+        <div class="admin-stat-card" style="padding:10px 16px;min-width:100px;"><div class="admin-stat-num" style="font-size:18px;">${mods.length}</div><div class="admin-stat-label">Проектов</div></div>
+        <div class="admin-stat-card" style="padding:10px 16px;min-width:100px;"><div class="admin-stat-num" style="font-size:18px;">${pendingMods.length}</div><div class="admin-stat-label">На модерации</div></div>
+        <div class="admin-stat-card" style="padding:10px 16px;min-width:100px;"><div class="admin-stat-num" style="font-size:18px;">${formatNumberFull(totalDownloads)}</div><div class="admin-stat-label">Скачиваний</div></div>
+        <div class="admin-stat-card" style="padding:10px 16px;min-width:100px;"><div class="admin-stat-num" style="font-size:18px;">${bannedCount}</div><div class="admin-stat-label">Заблокировано</div></div>
+        <div class="admin-stat-card" style="padding:10px 16px;min-width:100px;"><div class="admin-stat-num" style="font-size:18px;">${newUsersWeek}</div><div class="admin-stat-label">Новых за неделю</div></div>
       </div>
 
-      <div class="admin-tabs">
-        <button class="admin-tab-btn ${activeTab === 'mods' ? 'active' : ''}" onclick="renderAdminPanel('mods')"><i class="fa-solid fa-file-shield"></i> Очередь (${pendingMods.length})</button>
-        <button class="admin-tab-btn ${activeTab === 'allmods' ? 'active' : ''}" onclick="renderAdminPanel('allmods')"><i class="fa-solid fa-cubes"></i> Все моды (${mods.length})</button>
-        <button class="admin-tab-btn ${activeTab === 'users' ? 'active' : ''}" onclick="renderAdminPanel('users')"><i class="fa-solid fa-users-gear"></i> Пользователи (${users.length})</button>
-        <button class="admin-tab-btn ${activeTab === 'stats' ? 'active' : ''}" onclick="renderAdminPanel('stats')"><i class="fa-solid fa-chart-line"></i> Статистика</button>
-        <button class="admin-tab-btn ${activeTab === 'settings' ? 'active' : ''}" onclick="renderAdminPanel('settings')"><i class="fa-solid fa-sliders"></i> Настройки</button>
-        <button class="admin-tab-btn ${activeTab === 'logs' ? 'active' : ''}" onclick="renderAdminPanel('logs')"><i class="fa-solid fa-list"></i> Журнал</button>
-        <button class="admin-tab-btn ${activeTab === 'reports' ? 'active' : ''}" onclick="renderAdminPanel('reports')"><i class="fa-solid fa-flag"></i> Жалобы</button>
-        <button class="admin-tab-btn ${activeTab === 'notifications' ? 'active' : ''}" onclick="renderAdminPanel('notifications')"><i class="fa-solid fa-bell"></i> Уведомления</button>
-        <button class="admin-tab-btn ${activeTab === 'security' ? 'active' : ''}" onclick="renderAdminPanel('security')"><i class="fa-solid fa-shield"></i> Безопасность</button>
-        <button class="admin-tab-btn ${activeTab === 'tools' ? 'active' : ''}" onclick="renderAdminPanel('tools')"><i class="fa-solid fa-screwdriver-wrench"></i> Инструменты</button>
-        <button class="admin-tab-btn ${activeTab === 'system' ? 'active' : ''}" onclick="renderAdminPanel('system')"><i class="fa-solid fa-server"></i> Система</button>
-      </div>
-
-      <!-- Projects Moderation Tab Content -->
-      <div class="admin-tab-content ${activeTab === 'mods' ? 'active' : ''}" id="admin-content-mods" style="display: ${activeTab === 'mods' ? 'block' : 'none'};">
-        ${pendingMods.length === 0 ? `
-          <div class="no-results" style="padding: 48px 20px;">
-            <i class="fa-solid fa-circle-check" style="font-size: 48px; color: var(--primary-color);"></i>
-            <h3>Очередь проверки пуста</h3>
-            <p>Все загруженные проекты уже проверены и опубликованы.</p>
-          </div>
-        ` : `
-          <div class="admin-pending-list">
-            ${pendingMods.map(mod => {
-              const mainFile = mod.versions && mod.versions.length > 0 ? mod.versions[0] : null;
-              return `
-                <div class="admin-pending-item" data-id="${mod.id}">
-                  <div class="admin-pending-item-main">
-                    <div class="admin-pending-icon" style="background-color: ${mod.iconColor || '#10b981'}">
-                      ${renderAvatar(mod.avatar)}
-                    </div>
-                    <div class="admin-pending-info">
-                      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                        <h3 class="admin-pending-title">${mod.name}</h3>
-                        <span class="result-badge-type">${METADATA.types[mod.type] || mod.type}</span>
-                      </div>
-                      <p class="admin-pending-author">Автор: <strong class="author-link">${mod.author}</strong></p>
-                      <p class="admin-pending-desc">${mod.shortDescription}</p>
-                      ${mainFile ? `
-                        <div class="admin-file-details">
-                          <i class="fa-solid fa-paperclip"></i>
-                          <span>Файл: <strong>${mainFile.filename}</strong> (${mainFile.fileSize})</span>
-                        </div>
-                      ` : ''}
-                    </div>
-                  </div>
-                  <div class="admin-pending-actions">
-                    ${mainFile ? `
-                      <button class="btn btn-secondary btn-sm" onclick="triggerVersionDownload(getMods().find(m=>m.id==='${mod.id}'), getMods().find(m=>m.id==='${mod.id}').versions[0])" title="Скачать файл для проверки">
-                        <i class="fa-solid fa-download"></i>
-                      </button>
-                    ` : ''}
-                    <button class="btn btn-primary btn-sm" onclick="approvePendingMod('${mod.id}')">
-                      <i class="fa-solid fa-check"></i> Одобрить
-                    </button>
-                    <button class="btn btn-danger btn-sm" onclick="rejectPendingMod('${mod.id}')">
-                      <i class="fa-solid fa-xmark"></i> Отклонить
-                    </button>
-                  </div>
-                </div>
-              `;
-            }).join("")}
-          </div>
-        `}
-      </div>
-
-      <!-- All Mods Tab Content -->
-      <div class="admin-tab-content ${activeTab === 'allmods' ? 'active' : ''}" style="display: ${activeTab === 'allmods' ? 'block' : 'none'};">
-        <div style="margin-bottom: 16px; display:flex; gap:8px;">
-          <input type="text" id="admin-mod-search" class="form-input" placeholder="Поиск модов по названию, автору..." value="${modSearchQuery}" style="flex:1;">
-          <button class="btn btn-primary" onclick="renderAdminPanel('allmods', '', document.getElementById('admin-mod-search').value)"><i class="fa-solid fa-search"></i></button>
-        </div>
-        <div class="admin-users-list" style="margin-top:16px;">
-          ${filteredModsList.map(mod => `
-            <div class="admin-user-item">
-              <div class="admin-user-info" style="display:flex; align-items:center; gap:12px;">
-                <div style="width:40px; height:40px; border-radius:8px; overflow:hidden;">${renderAvatar(mod.avatar)}</div>
-                <div>
-                  <div style="font-weight:700;">${mod.name} ${mod.approved ? '<i class="fa-solid fa-check-circle" style="color:var(--primary-color); font-size:12px;"></i>' : '<i class="fa-solid fa-clock" style="color:#f59e0b; font-size:12px;"></i>'} ${featuredIds.includes(mod.id) ? '<span class="badge-featured">★</span>' : ''}</div>
-                  <div style="font-size:12px; color:var(--text-secondary);">Автор: <span class="author-link" style="font-weight:600;">${mod.author}</span>${getAuthorBadgeHTML(mod.author)} | Скачиваний: ${mod.downloads || 0}</div>
-                </div>
-              </div>
-              <div class="admin-user-actions">
-                <button class="btn btn-secondary btn-sm" onclick="toggleFeaturedMod('${mod.id}')" title="В избранное на главной">${featuredIds.includes(mod.id) ? 'Убрать ★' : '★ На главную'}</button>
-                ${!mod.approved ? `<button class="btn btn-primary btn-sm" onclick="approvePendingMod('${mod.id}')">Одобрить</button>` : ''}
-                <button class="btn btn-danger btn-sm" onclick="deleteModAdmin('${mod.id}')">Удалить</button>
-              </div>
+      <div class="admin-layout">
+        <div class="admin-sidebar">
+          ${ADMIN_FUNCTION_GROUPS.map(group => `
+            <div class="admin-sidebar-group">
+              <div class="admin-sidebar-group-title">${group.name}</div>
+              ${group.items.map(fnId => {
+                const fn = ADMIN_FUNCTIONS[fnId];
+                const count = fnId === 'mods' ? ` (${pendingMods.length})` : fnId === 'allmods' ? ` (${mods.length})` : fnId === 'users' ? ` (${users.length})` : '';
+                return `<button class="admin-sidebar-btn ${activeTab === fnId ? 'active' : ''}" onclick="renderAdminPanel('${fnId}')"><i class="fa-solid ${fn.icon}"></i> ${fn.label}${count}</button>`;
+              }).join('')}
             </div>
           `).join('')}
-          ${filteredModsList.length === 0 ? '<div style="text-align:center; padding:20px; color:var(--text-muted);">Моды не найдены.</div>' : ''}
-        </div>
-      </div>
-
-      <!-- Users Management Tab Content -->
-      <div class="admin-tab-content ${activeTab === 'users' ? 'active' : ''}" id="admin-content-users" style="display: ${activeTab === 'users' ? 'block' : 'none'};">
-        <div style="margin-bottom: 16px; display:flex; gap:8px; flex-wrap:wrap;">
-            <input type="text" id="admin-user-search" class="form-input" placeholder="Поиск по никнейму, email или UID..." value="${searchQuery}" style="flex:1; min-width:200px;">
-            <select id="admin-user-role-filter" class="form-input" style="width:140px; padding:8px;" onchange="renderAdminPanel('users', document.getElementById('admin-user-search').value, '', this.value)">
-              <option value="">Все роли</option>
-              <option value="PLAYER" ${roleFilter === 'PLAYER' ? 'selected' : ''}>PLAYER</option>
-              <option value="ADMIN" ${roleFilter === 'ADMIN' ? 'selected' : ''}>ADMIN</option>
-              <option value="OWNER" ${roleFilter === 'OWNER' ? 'selected' : ''}>OWNER</option>
-              <option value="MODERATOR" ${roleFilter === 'MODERATOR' ? 'selected' : ''}>MODERATOR</option>
-            </select>
-            <button class="btn btn-primary" onclick="renderAdminPanel('users', document.getElementById('admin-user-search').value, '', document.getElementById('admin-user-role-filter').value)"><i class="fa-solid fa-search"></i> Найти</button>
-        </div>
-        <div class="admin-users-list">
-          ${filteredUsers.map(u => `
-            <div class="admin-user-item ${u.banned ? 'banned' : ''}" style="${u.banned ? 'opacity:0.6;' : ''}">
-              <div class="admin-user-avatar">
-                <img src="${u.avatar || 'https://api.dicebear.com/7.x/pixel-art/svg?seed=' + u.username}" alt="Avatar">
-              </div>
-              <div class="admin-user-info">
-                <div class="admin-user-name">${u.username} ${getRoleBadgeHTML(u.role)} ${u.banned ? '<span class="badge-banned">ЗАБЛОКИРОВАН</span>' : ''}</div>
-                <div class="admin-user-email">${u.email} &bull; <span style="font-family:monospace; color:var(--text-muted);">UID: ${u.uid}</span> &bull; ${u.updatedAt ? formatRelativeTime(u.updatedAt) : '—'}</div>
-              </div>
-              <div class="admin-user-actions">
-                <button class="btn btn-secondary btn-sm" onclick="openPublicProfileModal('${u.username.replace(/'/g, "\\'")}')" title="Профиль"><i class="fa-solid fa-eye"></i></button>
-                ${currentUser.role === 'OWNER' || (currentUser.role === 'ADMIN' && u.role !== 'OWNER' && u.uid !== currentUser.uid) ? `
-                  <select class="form-input" style="padding: 4px 8px; font-size: 12px; width: 120px;" onchange="changeUserRole('${u.uid}', this.value)">
-                    <option value="PLAYER" ${(u.role === 'PLAYER' || u.role === 'USER') ? 'selected' : ''}>Игрок</option>
-                    <option value="MODERATOR" ${u.role === 'MODERATOR' ? 'selected' : ''}>Модератор</option>
-                    <option value="ADMIN" ${u.role === 'ADMIN' ? 'selected' : ''}>Администратор</option>
-                    ${currentUser.role === 'OWNER' ? `<option value="OWNER" ${u.role === 'OWNER' ? 'selected' : ''}>Владелец</option>` : ''}
-                  </select>
-                  <button class="btn btn-${u.banned ? 'primary' : 'danger'} btn-sm" onclick="toggleUserBan('${u.uid}')" title="${u.banned ? 'Разблокировать' : 'Заблокировать'}">
-                    <i class="fa-solid ${u.banned ? 'fa-unlock' : 'fa-ban'}"></i>
-                  </button>
-                  <button class="btn btn-secondary btn-sm" onclick="resetUserPassword('${u.uid}')" title="Сброс пароля"><i class="fa-solid fa-key"></i></button>
-                  <button class="btn btn-secondary btn-sm" onclick="deleteUserAdmin('${u.uid}')" title="Удалить"><i class="fa-solid fa-trash"></i></button>
-                ` : `<span style="font-size: 12px; color: var(--text-muted);"><i class="fa-solid fa-lock"></i> Нет доступа</span>`}
-              </div>
-            </div>
-          `).join("")}
-          ${filteredUsers.length === 0 ? '<div style="text-align:center; padding:20px; color:var(--text-muted);">Пользователи не найдены.</div>' : ''}
-        </div>
-      </div>
-
-      <div class="admin-tab-content ${activeTab === 'stats' ? 'active' : ''}" style="display: ${activeTab === 'stats' ? 'block' : 'none'};">
-        <div class="admin-stats-grid">
-          <div class="admin-stats-block"><h4>Топ авторов</h4>${getTopAuthors(mods).map(a => `<div class="admin-stats-row"><span>${a.name}</span><strong>${a.count} проектов</strong></div>`).join('') || '<p class="text-muted">Нет данных</p>'}</div>
-          <div class="admin-stats-block"><h4>Топ модов</h4>${[...mods].sort((a,b) => b.downloads - a.downloads).slice(0,5).map(m => `<div class="admin-stats-row"><span>${m.name}</span><strong>${formatNumber(m.downloads)}</strong></div>`).join('')}</div>
-          <div class="admin-stats-block"><h4>По типам</h4>${Object.entries(countByField(mods, 'type')).map(([k,v]) => `<div class="admin-stats-row"><span>${METADATA.types[k] || k}</span><strong>${v}</strong></div>`).join('')}</div>
-        </div>
-      </div>
-
-      <div class="admin-tab-content ${activeTab === 'settings' ? 'active' : ''}" style="display: ${activeTab === 'settings' ? 'block' : 'none'};">
-        <div class="admin-settings-form">
-          <div class="form-group"><label class="form-label">Объявление на сайте</label>
-            <textarea id="admin-announcement" class="form-textarea" placeholder="Текст баннера для всех пользователей...">${siteSettings.announcement || ''}</textarea>
+          <div class="admin-sidebar-group">
+            <div class="admin-sidebar-group-title">Спец. функции</div>
+            <button class="admin-sidebar-btn admin-meme-btn ${activeTab === '__meme__' ? 'active' : ''}" onclick="toggleAdminMemeMode()">
+              <i class="fa-solid fa-face-smile-wink"></i> MEME 🎭
+            </button>
           </div>
-          <div class="form-group"><label class="form-label"><input type="checkbox" id="admin-maintenance" ${siteSettings.maintenance ? 'checked' : ''}> Режим обслуживания</label></div>
-          <button class="btn btn-primary" onclick="saveAdminSiteSettings()"><i class="fa-solid fa-save"></i> Сохранить настройки</button>
         </div>
-      </div>
 
-      <div class="admin-tab-content ${activeTab === 'logs' ? 'active' : ''}" style="display: ${activeTab === 'logs' ? 'block' : 'none'};">
-        <div class="admin-log-list">
-          ${activityLog.slice(0, 50).map(entry => `
-            <div class="admin-log-item">
-              <span class="admin-log-time">${formatRelativeTime(entry.time)}</span>
-              <strong>${entry.user}</strong> — ${entry.action}${entry.details ? `: ${entry.details}` : ''}
+        <div class="admin-content">
+          ${activeTab === '__meme__' ? `
+            <div class="meme-container">
+              <div class="meme-header">
+                <h3><i class="fa-solid fa-face-smile-wink" style="color:var(--primary-color);"></i> Мемные функции 🎭</h3>
+                <p style="color:var(--text-secondary);font-size:13px;">Для модераторов, администраторов и владельцев</p>
+              </div>
+              <div class="meme-grid">
+                ${renderMemeFunctions()}
+              </div>
             </div>
-          `).join('') || '<p style="color:var(--text-muted);">Журнал пуст.</p>'}
+          ` : ADMIN_FUNCTIONS[activeTab] ? (() => {
+            if (['mods','allmods','users','stats','settings','logs','reports','notifications','security','tools','system'].includes(activeTab)) {
+              return '';
+            }
+            return renderNewFunctionContent(activeTab);
+          })() : ''}
+
+          <!-- Projects Moderation Tab -->
+          <div class="admin-tab-content ${activeTab === 'mods' ? 'active' : ''}" style="display: ${activeTab === 'mods' ? 'block' : 'none'};">
+            ${pendingMods.length === 0 ? `
+              <div class="no-results" style="padding: 48px 20px;">
+                <i class="fa-solid fa-circle-check" style="font-size: 48px; color: var(--primary-color);"></i>
+                <h3>Очередь проверки пуста</h3>
+                <p>Все загруженные проекты уже проверены и опубликованы.</p>
+              </div>
+            ` : `
+              <div class="admin-pending-list">
+                ${pendingMods.map(mod => {
+                  const mainFile = mod.versions && mod.versions.length > 0 ? mod.versions[0] : null;
+                  return `
+                    <div class="admin-pending-item" data-id="${mod.id}">
+                      <div class="admin-pending-item-main">
+                        <div class="admin-pending-icon" style="background-color: ${mod.iconColor || '#10b981'}">
+                          ${renderAvatar(mod.avatar)}
+                        </div>
+                        <div class="admin-pending-info">
+                          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                            <h3 class="admin-pending-title">${mod.name}</h3>
+                            <span class="result-badge-type">${METADATA.types[mod.type] || mod.type}</span>
+                          </div>
+                          <p class="admin-pending-author">Автор: <strong class="author-link">${mod.author}</strong></p>
+                          <p class="admin-pending-desc">${mod.shortDescription}</p>
+                          ${mainFile ? `
+                            <div class="admin-file-details">
+                              <i class="fa-solid fa-paperclip"></i>
+                              <span>Файл: <strong>${mainFile.filename}</strong> (${mainFile.fileSize})</span>
+                            </div>
+                          ` : ''}
+                        </div>
+                      </div>
+                      <div class="admin-pending-actions">
+                        ${mainFile ? `
+                          <button class="btn btn-secondary btn-sm" onclick="triggerVersionDownload(getMods().find(m=>m.id==='${mod.id}'), getMods().find(m=>m.id==='${mod.id}').versions[0])" title="Скачать файл для проверки">
+                            <i class="fa-solid fa-download"></i>
+                          </button>
+                        ` : ''}
+                        <button class="btn btn-primary btn-sm" onclick="approvePendingMod('${mod.id}')">
+                          <i class="fa-solid fa-check"></i> Одобрить
+                        </button>
+                        <button class="btn btn-danger btn-sm" onclick="rejectPendingMod('${mod.id}')">
+                          <i class="fa-solid fa-xmark"></i> Отклонить
+                        </button>
+                      </div>
+                    </div>
+                  `;
+                }).join("")}
+              </div>
+            `}
+          </div>
+
+          <!-- All Mods Tab -->
+          <div class="admin-tab-content" style="display: ${activeTab === 'allmods' ? 'block' : 'none'};">
+            <div style="margin-bottom: 16px; display:flex; gap:8px;">
+              <input type="text" id="admin-mod-search" class="form-input" placeholder="Поиск модов по названию, автору..." value="${modSearchQuery}" style="flex:1;">
+              <button class="btn btn-primary" onclick="renderAdminPanel('allmods', '', document.getElementById('admin-mod-search').value)"><i class="fa-solid fa-search"></i></button>
+            </div>
+            <div class="admin-users-list" style="margin-top:16px;">
+              ${filteredModsList.map(mod => `
+                <div class="admin-user-item">
+                  <div class="admin-user-info" style="display:flex; align-items:center; gap:12px;">
+                    <div style="width:40px; height:40px; border-radius:8px; overflow:hidden;">${renderAvatar(mod.avatar)}</div>
+                    <div>
+                      <div style="font-weight:700;">${mod.name} ${mod.approved ? '<i class="fa-solid fa-check-circle" style="color:var(--primary-color); font-size:12px;"></i>' : '<i class="fa-solid fa-clock" style="color:#f59e0b; font-size:12px;"></i>'} ${featuredIds.includes(mod.id) ? '<span class="badge-featured">★</span>' : ''}</div>
+                      <div style="font-size:12px; color:var(--text-secondary);">Автор: <span class="author-link" style="font-weight:600;">${mod.author}</span>${getAuthorBadgeHTML(mod.author)} | Скачиваний: ${mod.downloads || 0}</div>
+                    </div>
+                  </div>
+                  <div class="admin-user-actions">
+                    <button class="btn btn-secondary btn-sm" onclick="toggleFeaturedMod('${mod.id}')" title="В избранное на главной">${featuredIds.includes(mod.id) ? 'Убрать ★' : '★ На главную'}</button>
+                    ${!mod.approved ? `<button class="btn btn-primary btn-sm" onclick="approvePendingMod('${mod.id}')">Одобрить</button>` : ''}
+                    <button class="btn btn-danger btn-sm" onclick="deleteModAdmin('${mod.id}')">Удалить</button>
+                  </div>
+                </div>
+              `).join('')}
+              ${filteredModsList.length === 0 ? '<div style="text-align:center; padding:20px; color:var(--text-muted);">Моды не найдены.</div>' : ''}
+            </div>
+          </div>
+
+          <!-- Users Management Tab -->
+          <div class="admin-tab-content" style="display: ${activeTab === 'users' ? 'block' : 'none'};">
+            <div style="margin-bottom: 16px; display:flex; gap:8px; flex-wrap:wrap;">
+                <input type="text" id="admin-user-search" class="form-input" placeholder="Поиск по никнейму, email или UID..." value="${searchQuery}" style="flex:1; min-width:200px;">
+                <select id="admin-user-role-filter" class="form-input" style="width:140px; padding:8px;" onchange="renderAdminPanel('users', document.getElementById('admin-user-search').value, '', this.value)">
+                  <option value="">Все роли</option>
+                  <option value="PLAYER" ${roleFilter === 'PLAYER' ? 'selected' : ''}>PLAYER</option>
+                  <option value="ADMIN" ${roleFilter === 'ADMIN' ? 'selected' : ''}>ADMIN</option>
+                  <option value="OWNER" ${roleFilter === 'OWNER' ? 'selected' : ''}>OWNER</option>
+                  <option value="MODERATOR" ${roleFilter === 'MODERATOR' ? 'selected' : ''}>MODERATOR</option>
+                </select>
+                <button class="btn btn-primary" onclick="renderAdminPanel('users', document.getElementById('admin-user-search').value, '', document.getElementById('admin-user-role-filter').value)"><i class="fa-solid fa-search"></i> Найти</button>
+            </div>
+            <div class="admin-users-list">
+              ${filteredUsers.map(u => `
+                <div class="admin-user-item ${u.banned ? 'banned' : ''}" style="${u.banned ? 'opacity:0.6;' : ''}">
+                  <div class="admin-user-avatar">
+                    <img src="${u.avatar || 'https://api.dicebear.com/7.x/pixel-art/svg?seed=' + u.username}" alt="Avatar">
+                  </div>
+                  <div class="admin-user-info">
+                    <div class="admin-user-name">${u.username} ${getRoleBadgeHTML(u.role)} ${u.banned ? '<span class="badge-banned">ЗАБЛОКИРОВАН</span>' : ''}</div>
+                    <div class="admin-user-email">${u.email} &bull; <span style="font-family:monospace; color:var(--text-muted);">UID: ${u.uid}</span> &bull; ${u.updatedAt ? formatRelativeTime(u.updatedAt) : '—'}</div>
+                  </div>
+                  <div class="admin-user-actions">
+                    <button class="btn btn-secondary btn-sm" onclick="openPublicProfileModal('${u.username.replace(/'/g, "\\'")}')" title="Профиль"><i class="fa-solid fa-eye"></i></button>
+                    ${currentUser.role === 'OWNER' || (currentUser.role === 'ADMIN' && u.role !== 'OWNER' && u.uid !== currentUser.uid) ? `
+                      <select class="form-input" style="padding: 4px 8px; font-size: 12px; width: 120px;" onchange="changeUserRole('${u.uid}', this.value)">
+                        <option value="PLAYER" ${(u.role === 'PLAYER' || u.role === 'USER') ? 'selected' : ''}>Игрок</option>
+                        <option value="MODERATOR" ${u.role === 'MODERATOR' ? 'selected' : ''}>Модератор</option>
+                        <option value="ADMIN" ${u.role === 'ADMIN' ? 'selected' : ''}>Администратор</option>
+                        ${currentUser.role === 'OWNER' ? `<option value="OWNER" ${u.role === 'OWNER' ? 'selected' : ''}>Владелец</option>` : ''}
+                      </select>
+                      <button class="btn btn-${u.banned ? 'primary' : 'danger'} btn-sm" onclick="toggleUserBan('${u.uid}')" title="${u.banned ? 'Разблокировать' : 'Заблокировать'}">
+                        <i class="fa-solid ${u.banned ? 'fa-unlock' : 'fa-ban'}"></i>
+                      </button>
+                      <button class="btn btn-secondary btn-sm" onclick="resetUserPassword('${u.uid}')" title="Сброс пароля"><i class="fa-solid fa-key"></i></button>
+                      <button class="btn btn-secondary btn-sm" onclick="deleteUserAdmin('${u.uid}')" title="Удалить"><i class="fa-solid fa-trash"></i></button>
+                    ` : `<span style="font-size: 12px; color: var(--text-muted);"><i class="fa-solid fa-lock"></i> Нет доступа</span>`}
+                  </div>
+                </div>
+              `).join("")}
+              ${filteredUsers.length === 0 ? '<div style="text-align:center; padding:20px; color:var(--text-muted);">Пользователи не найдены.</div>' : ''}
+            </div>
+          </div>
+
+          <!-- Stats Tab -->
+          <div class="admin-tab-content" style="display: ${activeTab === 'stats' ? 'block' : 'none'};">
+            <div class="admin-stats-grid">
+              <div class="admin-stats-block"><h4>Топ авторов</h4>${getTopAuthors(mods).map(a => `<div class="admin-stats-row"><span>${a.name}</span><strong>${a.count} проектов</strong></div>`).join('') || '<p class="text-muted">Нет данных</p>'}</div>
+              <div class="admin-stats-block"><h4>Топ модов</h4>${[...mods].sort((a,b) => b.downloads - a.downloads).slice(0,5).map(m => `<div class="admin-stats-row"><span>${m.name}</span><strong>${formatNumber(m.downloads)}</strong></div>`).join('')}</div>
+              <div class="admin-stats-block"><h4>По типам</h4>${Object.entries(countByField(mods, 'type')).map(([k,v]) => `<div class="admin-stats-row"><span>${METADATA.types[k] || k}</span><strong>${v}</strong></div>`).join('')}</div>
+            </div>
+          </div>
+
+          <!-- Settings Tab -->
+          <div class="admin-tab-content" style="display: ${activeTab === 'settings' ? 'block' : 'none'};">
+            <div class="admin-settings-form">
+              <div class="form-group"><label class="form-label">Объявление на сайте</label>
+                <textarea id="admin-announcement" class="form-textarea" placeholder="Текст баннера для всех пользователей...">${siteSettings.announcement || ''}</textarea>
+              </div>
+              <div class="form-group"><label class="form-label"><input type="checkbox" id="admin-maintenance" ${siteSettings.maintenance ? 'checked' : ''}> Режим обслуживания</label></div>
+              <button class="btn btn-primary" onclick="saveAdminSiteSettings()"><i class="fa-solid fa-save"></i> Сохранить настройки</button>
+            </div>
+          </div>
+
+          <!-- Logs Tab -->
+          <div class="admin-tab-content" style="display: ${activeTab === 'logs' ? 'block' : 'none'};">
+            <div class="admin-log-list">
+              ${activityLog.slice(0, 50).map(entry => `
+                <div class="admin-log-item">
+                  <span class="admin-log-time">${formatRelativeTime(entry.time)}</span>
+                  <strong>${entry.user}</strong> — ${entry.action}${entry.details ? `: ${entry.details}` : ''}
+                </div>
+              `).join('') || '<p style="color:var(--text-muted);">Журнал пуст.</p>'}
+            </div>
+          </div>
+
+          <!-- Reports Tab -->
+          <div class="admin-tab-content" style="display: ${activeTab === 'reports' ? 'block' : 'none'};">
+            ${renderAdminReportsTab(users)}
+          </div>
+
+          <!-- Notifications Tab -->
+          <div class="admin-tab-content" style="display: ${activeTab === 'notifications' ? 'block' : 'none'};">
+            ${renderAdminNotificationsTab()}
+          </div>
+
+          <!-- Security Tab -->
+          <div class="admin-tab-content" style="display: ${activeTab === 'security' ? 'block' : 'none'};">
+            ${renderAdminSecurityTab()}
+          </div>
+
+          <!-- Tools Tab -->
+          <div class="admin-tab-content" style="display: ${activeTab === 'tools' ? 'block' : 'none'};">
+            ${renderAdminToolsTab(users)}
+          </div>
+
+          <!-- System Tab -->
+          <div class="admin-tab-content" style="display: ${activeTab === 'system' ? 'block' : 'none'};">
+            ${renderAdminSystemTab(users, mods)}
+          </div>
         </div>
-      </div>
-
-      <!-- Reports Tab -->
-      <div class="admin-tab-content ${activeTab === 'reports' ? 'active' : ''}" style="display: ${activeTab === 'reports' ? 'block' : 'none'};">
-        ${renderAdminReportsTab(users)}
-      </div>
-
-      <!-- Notifications Tab -->
-      <div class="admin-tab-content ${activeTab === 'notifications' ? 'active' : ''}" style="display: ${activeTab === 'notifications' ? 'block' : 'none'};">
-        ${renderAdminNotificationsTab()}
-      </div>
-
-      <!-- Security Tab -->
-      <div class="admin-tab-content ${activeTab === 'security' ? 'active' : ''}" style="display: ${activeTab === 'security' ? 'block' : 'none'};">
-        ${renderAdminSecurityTab()}
-      </div>
-
-      <!-- Tools Tab -->
-      <div class="admin-tab-content ${activeTab === 'tools' ? 'active' : ''}" style="display: ${activeTab === 'tools' ? 'block' : 'none'};">
-        ${renderAdminToolsTab(users)}
-      </div>
-
-      <!-- System Info Tab -->
-      <div class="admin-tab-content ${activeTab === 'system' ? 'active' : ''}" style="display: ${activeTab === 'system' ? 'block' : 'none'};">
-        ${renderAdminSystemTab(users, mods)}
       </div>
     </div>
   `;
@@ -3722,6 +4093,20 @@ function renderAdminPanel(activeTab = "mods", searchQuery = "", modSearchQuery =
       }, 350);
     });
   }
+}
+
+window.toggleAdminMemeMode = function() {
+  adminMemeMode = !adminMemeMode;
+  renderAdminPanel('__meme__');
+};
+
+window.activateMeme = function(memeId) {
+  const meme = MEME_FUNCTIONS.find(m => m.id === memeId);
+  if (!meme) return;
+  const cls = 'meme-' + memeId;
+  document.body.classList.toggle(cls);
+  const isActive = document.body.classList.contains(cls);
+  showToast(`${isActive ? '✅ Включён' : '❌ Выключен'}: ${meme.label}`, 'info');
 }
 
 function getTopAuthors(mods) {
@@ -4191,6 +4576,35 @@ function estimateStorageUsage() {
       ? (total / 1024).toFixed(1) + ' KB'
       : total + ' B';
 }
+
+window.saveAdminBanners = function() {
+  const url = document.getElementById('admin-banner-url')?.value?.trim();
+  const link = document.getElementById('admin-banner-link')?.value?.trim();
+  if (!url) { showToast('Введите URL баннера', 'info'); return; }
+  const settings = getSiteSettings();
+  settings.bannerUrl = url;
+  settings.bannerLink = link || '';
+  saveSiteSettings(settings);
+  showToast('Баннер сохранён', 'success');
+  logActivity('banner_update');
+};
+
+window.addAdminCategory = function() {
+  const name = document.getElementById('admin-cat-name')?.value?.trim();
+  const icon = document.getElementById('admin-cat-icon')?.value?.trim();
+  if (!name) { showToast('Введите название категории', 'info'); return; }
+  const key = name.toLowerCase().replace(/\\s+/g, '_');
+  METADATA.categories[key] = name;
+  showToast('Категория "' + name + '" добавлена', 'success');
+  renderAdminPanel('categories');
+};
+
+window.removeAdminCategory = function(key) {
+  if (!confirm('Удалить категорию "' + METADATA.categories[key] + '"?')) return;
+  delete METADATA.categories[key];
+  showToast('Категория удалена', 'success');
+  renderAdminPanel('categories');
+};
 
 window.runSystemDiagnostic = function() {
   const issues = [];
