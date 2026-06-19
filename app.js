@@ -18,6 +18,7 @@ const state = {
     categories: [],
     loaders: [],
     gameVersions: [],
+    favorites: false,
     sort: "downloads" // downloads, relevance, follows, updated, created
   }
 };
@@ -48,8 +49,56 @@ const METADATA = {
     neoforge: "NeoForge",
     quilt: "Quilt"
   },
-  gameVersions: ["1.20.4", "1.20.2", "1.20.1", "1.19.4", "1.19.2", "1.18.2", "1.12.2"]
+  gameVersions: generateAllGameVersions()
 };
+
+function generateAllGameVersions() {
+  const releases = [
+    ["1.21", [5, 4, 3, 2, 1, 0]],
+    ["1.20", [6, 5, 4, 3, 2, 1, 0]],
+    ["1.19", [4, 3, 2, 1, 0]],
+    ["1.18", [2, 1, 0]],
+    ["1.17", [1, 0]],
+    ["1.16", [5, 4, 3, 2, 1, 0]],
+    ["1.15", [2, 1, 0]],
+    ["1.14", [4, 3, 2, 1, 0]],
+    ["1.13", [2, 1, 0]],
+    ["1.12", [2, 1, 0]],
+    ["1.11", [2, 1, 0]],
+    ["1.10", [2, 1, 0]],
+    ["1.9", [4, 3, 2, 1, 0]],
+    ["1.8", [9, 8, 7, 6, 5, 4, 3, 2, 1, 0]],
+    ["1.7", [10, 9, 8, 7, 6, 5, 4, 3, 2]],
+    ["1.6", [4, 2, 1]],
+    ["1.5", [2, 1]],
+    ["1.4", [7, 6, 5, 4, 2]],
+    ["1.3", [2, 1]],
+    ["1.2", [5, 4, 3, 2, 1]],
+    ["1.1", [0]],
+    ["1.0.0", []]
+  ];
+  const versions = [];
+  releases.forEach(([major, patches]) => {
+    if (patches.length === 0) {
+      versions.push(major);
+      return;
+    }
+    patches.forEach(p => {
+      versions.push(p === 0 ? major : `${major}.${p}`);
+    });
+  });
+  return versions;
+}
+
+function getVersionsInRange(fromVer, toVer) {
+  const all = METADATA.gameVersions;
+  const fromIdx = all.indexOf(fromVer);
+  const toIdx = all.indexOf(toVer);
+  if (fromIdx === -1 || toIdx === -1) return [];
+  const start = Math.min(fromIdx, toIdx);
+  const end = Math.max(fromIdx, toIdx);
+  return all.slice(start, end + 1);
+}
 
 // Initialize User Database in LocalStorage
 function initUserDatabase() {
@@ -82,7 +131,8 @@ function initUserDatabase() {
   
   const stored = localStorage.getItem("registered_users");
   if (!stored || !stored.includes('"role"') || stored.includes('minedev.work@gmail.com') || stored.includes('MS-')) {
-    localStorage.setItem("registered_users", JSON.stringify(DEFAULT_USERS));
+    const defaults = DEFAULT_USERS.map(u => ({ ...u, updatedAt: new Date().toISOString() }));
+    localStorage.setItem("registered_users", JSON.stringify(defaults));
   }
 
   const curUser = localStorage.getItem("current_user");
@@ -92,25 +142,189 @@ function initUserDatabase() {
 }
 
 let syncPushTimeout = null;
+let syncPollInterval = null;
+let lastSyncTime = null;
+
+function parseSyncTime(value) {
+  if (!value) return 0;
+  const t = Date.parse(value);
+  return Number.isNaN(t) ? 0 : t;
+}
+
+function mergeUsersSync(local, remote) {
+  const map = new Map();
+  [...local, ...remote].forEach(u => {
+    if (!u?.uid) return;
+    const existing = map.get(u.uid);
+    if (!existing) {
+      map.set(u.uid, u);
+      return;
+    }
+    const pick = parseSyncTime(u.updatedAt) >= parseSyncTime(existing.updatedAt) ? u : existing;
+    const other = pick === u ? existing : u;
+    map.set(u.uid, {
+      ...other,
+      ...pick,
+      settings: { ...(other.settings || {}), ...(pick.settings || {}) }
+    });
+  });
+  return Array.from(map.values());
+}
+
+function mergeModsSync(local, remote) {
+  const map = new Map();
+  [...local, ...remote].forEach(m => {
+    if (!m?.id) return;
+    const existing = map.get(m.id);
+    if (!existing) {
+      map.set(m.id, m);
+      return;
+    }
+    const pick = parseSyncTime(m.updatedAt) >= parseSyncTime(existing.updatedAt) ? m : existing;
+    const other = pick === m ? existing : m;
+    map.set(m.id, {
+      ...other,
+      ...pick,
+      downloads: Math.max(existing.downloads || 0, m.downloads || 0),
+      follows: Math.max(existing.follows || 0, m.follows || 0),
+      views: Math.max(existing.views || 0, m.views || 0)
+    });
+  });
+  return Array.from(map.values());
+}
+
+function refreshCurrentUserFromDb() {
+  const currentUser = JSON.parse(localStorage.getItem("current_user") || "null");
+  if (!currentUser?.uid) return;
+  const users = JSON.parse(localStorage.getItem("registered_users") || "[]");
+  const fresh = users.find(u => u.uid === currentUser.uid);
+  if (fresh) {
+    localStorage.setItem("current_user", JSON.stringify(fresh));
+    setupTheme();
+    applyUserSettings();
+  }
+}
+
+function applyRemoteSyncData(data, silent = false) {
+  if (!data) return false;
+  let changed = false;
+  const localMods = JSON.parse(localStorage.getItem("mods_data") || "[]");
+  const localUsers = JSON.parse(localStorage.getItem("registered_users") || "[]");
+
+  if (Array.isArray(data.mods)) {
+    const merged = mergeModsSync(localMods, data.mods);
+    if (JSON.stringify(merged) !== JSON.stringify(localMods)) {
+      originalSetItem.call(localStorage, "mods_data", JSON.stringify(merged));
+      changed = true;
+    }
+  }
+  if (Array.isArray(data.users)) {
+    const merged = mergeUsersSync(localUsers, data.users);
+    if (JSON.stringify(merged) !== JSON.stringify(localUsers)) {
+      originalSetItem.call(localStorage, "registered_users", JSON.stringify(merged));
+      changed = true;
+    }
+  }
+  if (data.siteSettings) {
+    originalSetItem.call(localStorage, "site_settings", JSON.stringify(data.siteSettings));
+  }
+  if (Array.isArray(data.activityLog)) {
+    originalSetItem.call(localStorage, "activity_log", JSON.stringify(data.activityLog));
+  }
+  if (data.lastSync) lastSyncTime = data.lastSync;
+
+  refreshCurrentUserFromDb();
+  updateSyncStatusIndicator();
+
+  if (changed && !silent) {
+    const path = window.location.hash;
+    if (path === "#/" || path.startsWith("#/browse") || path.startsWith("#/mod/") || path === "#/admin") {
+      handleRoute();
+    }
+  }
+  return changed;
+}
+
 async function syncPush() {
   try {
     const mods = JSON.parse(localStorage.getItem("mods_data") || "[]");
     const users = JSON.parse(localStorage.getItem("registered_users") || "[]");
-    await fetch("/api/sync", {
+    const siteSettings = JSON.parse(localStorage.getItem("site_settings") || "{}");
+    const activityLog = JSON.parse(localStorage.getItem("activity_log") || "[]");
+    const res = await fetch("/api/sync", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({ mods, users })
+      body: JSON.stringify({ mods, users, siteSettings, activityLog })
     });
+    if (res.ok) {
+      const result = await res.json();
+      if (result.data) applyRemoteSyncData(result.data, true);
+      lastSyncTime = new Date().toISOString();
+      updateSyncStatusIndicator();
+    }
   } catch(e) {
     console.log("Local sync push failed (expected if on static host):", e);
   }
+}
+
+async function syncPull(silent = true) {
+  try {
+    const res = await fetch("/api/sync");
+    if (res.ok) {
+      const data = await res.json();
+      return applyRemoteSyncData(data, silent);
+    }
+  } catch(e) {
+    console.log("Local sync pull failed (expected if on static host):", e);
+  }
+  return false;
+}
+
+function startSyncPolling() {
+  if (syncPollInterval) return;
+  syncPollInterval = setInterval(() => syncPull(true), 12000);
+}
+
+function logActivity(action, details = "") {
+  const log = JSON.parse(localStorage.getItem("activity_log") || "[]");
+  const currentUser = JSON.parse(localStorage.getItem("current_user") || "null");
+  log.unshift({
+    id: Date.now().toString(36),
+    action,
+    details,
+    user: currentUser?.username || "system",
+    time: new Date().toISOString()
+  });
+  if (log.length > 200) log.length = 200;
+  localStorage.setItem("activity_log", JSON.stringify(log));
+
+  // Also track reports for admin panel
+  if (action === "mod_report") {
+    const reports = JSON.parse(localStorage.getItem("mod_reports") || "[]");
+    reports.unshift({ action, details, user: currentUser?.username || "system", time: new Date().toISOString() });
+    if (reports.length > 100) reports.length = 100;
+    localStorage.setItem("mod_reports", JSON.stringify(reports));
+  }
+
+  // Track login history for security tab
+  if (action === "user_login" || action === "user_register") {
+    const loginLog = JSON.parse(localStorage.getItem("login_history") || "[]");
+    loginLog.unshift({ action, username: currentUser?.username || "system", time: new Date().toISOString(), ip: "local" });
+    if (loginLog.length > 100) loginLog.length = 100;
+    localStorage.setItem("login_history", JSON.stringify(loginLog));
+  }
+}
+
+function touchUserUpdated(user) {
+  user.updatedAt = new Date().toISOString();
+  return user;
 }
 
 // Intercept LocalStorage to auto-sync to backend
 const originalSetItem = localStorage.setItem;
 localStorage.setItem = function(key, value) {
   originalSetItem.apply(this, arguments);
-  if (key === "mods_data" || key === "registered_users") {
+  if (key === "mods_data" || key === "registered_users" || key === "site_settings" || key === "activity_log") {
     if (syncPushTimeout) clearTimeout(syncPushTimeout);
     syncPushTimeout = setTimeout(syncPush, 500);
   }
@@ -120,52 +334,243 @@ localStorage.setItem = function(key, value) {
 async function initApp() {
   initUserDatabase();
   
-  // Try to pull data from backend
-  try {
-    const res = await fetch("/api/sync");
-    if (res.ok) {
-      const data = await res.json();
-      if (data.mods && data.mods.length > 0) {
-        originalSetItem.call(localStorage, "mods_data", JSON.stringify(data.mods));
-      }
-      if (data.users && data.users.length > 0) {
-        originalSetItem.call(localStorage, "registered_users", JSON.stringify(data.users));
-      }
-    }
-  } catch(e) {
-    console.log("Local sync pull failed (expected if on static host):", e);
-  }
+  await syncPull(true);
+  startSyncPolling();
 
   setupTheme();
+  applyUserSettings();
   setupRouting();
   setupGlobalEvents();
   setupSpotlightSearch();
+  setupSiteFeatures();
   renderUserAuth();
   setupAuthModalEvents();
+  setupSettingsModalEvents();
   setupProfileModalEvents();
   setupPublicProfileEvents();
+  renderSiteAnnouncement();
 }
 
-// --- THEME MANAGEMENT ---
-function setupTheme() {
-  const savedTheme = localStorage.getItem("theme") || "dark";
-  const themeToggle = document.getElementById("theme-toggle");
-  
-  if (savedTheme === "light") {
-    document.body.classList.add("light-theme");
-    themeToggle.innerHTML = '<i class="fa-solid fa-sun"></i>';
-  } else {
-    document.body.classList.remove("light-theme");
-    themeToggle.innerHTML = '<i class="fa-solid fa-moon"></i>';
+// --- THEME & USER SETTINGS ---
+const I18N = {
+  ru: {
+    nav_home: "Главная", nav_browse: "Обзор", nav_create: "Добавить мод",
+    login: "Войти", logout: "Выйти", settings_saved: "Настройки успешно сохранены",
+    sync_ok: "Синхронизировано", sync_pending: "Синхронизация...",
+    // Admin panel
+    admin_title: "Панель управления ModSphere",
+    admin_subtitle: "Модерация, пользователи, статистика и настройки платформы.",
+    admin_sync: "Синхронизировать", admin_export: "Экспорт JSON", admin_import: "Импорт JSON",
+    admin_approve_all: "Одобрить все", admin_tab_queue: "Очередь", admin_tab_allmods: "Все моды",
+    admin_tab_users: "Пользователи", admin_tab_stats: "Статистика", admin_tab_settings: "Настройки",
+    admin_tab_logs: "Журнал", admin_tab_reports: "Жалобы", admin_tab_notifications: "Уведомления",
+    admin_tab_security: "Безопасность", admin_tab_tools: "Инструменты",
+    admin_users_count: "Пользователей", admin_projects_count: "Проектов",
+    admin_pending: "На модерации", admin_downloads: "Скачиваний",
+    admin_banned: "Заблокировано", admin_new_week: "Новых за неделю",
+    admin_queue_empty: "Очередь проверки пуста",
+    admin_queue_empty_desc: "Все загруженные проекты уже проверены и опубликованы.",
+    admin_search_users: "Поиск по никнейму, email или UID...",
+    admin_search_mods: "Поиск модов по названию, автору...",
+    admin_all_roles: "Все роли", admin_find: "Найти",
+    admin_role_player: "Игрок", admin_role_moderator: "Модератор",
+    admin_role_admin: "Администратор", admin_role_owner: "Владелец",
+    admin_approve: "Одобрить", admin_reject: "Отклонить",
+    admin_no_access: "Нет доступа", admin_author: "Автор",
+    admin_top_authors: "Топ авторов", admin_top_mods: "Топ модов",
+    admin_by_types: "По типам", admin_no_data: "Нет данных",
+    admin_announcement: "Объявление на сайте", admin_maintenance: "Режим обслуживания",
+    admin_save_settings: "Сохранить настройки", admin_log_empty: "Журнал пуст.",
+    admin_users_not_found: "Пользователи не найдены.",
+    admin_mods_not_found: "Моды не найдены.",
+    admin_delete: "Удалить", admin_ban: "Заблокировать", admin_unban: "Разблокировать",
+    admin_reset_password: "Сброс пароля", admin_profile: "Профиль",
+    admin_featured: "★ На главную", admin_unfeatured: "Убрать ★",
+    admin_reports_empty: "Жалоб нет",
+    admin_reports_empty_desc: "Пользователи пока не отправляли жалобы.",
+    admin_send_notification: "Отправить уведомление",
+    admin_notif_title: "Заголовок", admin_notif_message: "Сообщение",
+    admin_notif_type: "Тип", admin_notif_send: "Отправить всем",
+    admin_notif_history: "История уведомлений", admin_notif_empty: "Уведомления не отправлялись.",
+    admin_security: "Безопасность и защита",
+    admin_ip_log: "Журнал входов", admin_force_logout: "Выход всех",
+    admin_2fa: "Двухфакторная аутентификация",
+    admin_tools: "Инструменты администратора",
+    admin_clear_cache: "Очистить кеш", admin_rebuild_index: "Пересобрать индекс",
+    admin_export_users_csv: "Экспорт юзеров CSV", admin_export_mods_csv: "Экспорт модов CSV",
+    admin_database_size: "Размер базы данных",
+    admin_quick_actions: "Быстрые действия",
+    // Settings
+    settings_title: "Настройки сайта",
+    settings_subtitle: "Выберите язык и тему оформления. Изменения сохраняются в вашем профиле.",
+    settings_language: "Язык интерфейса", settings_theme: "Тема (Стиль сайта)",
+    settings_compact: "Компактный режим", settings_compact_desc: "Уменьшить отступы интерфейса",
+    settings_animations: "Анимации", settings_animations_desc: "Включить анимации интерфейса",
+    settings_notifications: "Уведомления", settings_notifications_desc: "Email-уведомления о модерации",
+    settings_default_sort: "Сортировка по умолчанию", settings_date_format: "Формат дат",
+    settings_privacy: "Приватность", settings_show_profile: "Показывать профиль публично",
+    settings_show_email: "Показывать email в профиле",
+    settings_show_activity: "Показывать активность",
+    settings_accessibility: "Доступность",
+    settings_font_size: "Размер шрифта",
+    settings_font_normal: "Обычный", settings_font_large: "Крупный", settings_font_xl: "Очень крупный",
+    settings_high_contrast: "Повышенный контраст",
+    settings_danger_zone: "Опасная зона",
+    settings_clear_data: "Очистить просмотры",
+    settings_clear_data_desc: "Очистить историю просмотренных модов и избранное.",
+    settings_apply: "Применить", settings_cancel: "Отмена",
+    // General
+    downloads: "Скачиваний", follows: "Подписчиков",
+    sort_downloads: "Скачивания", sort_follows: "Подписчики",
+    sort_updated: "Обновлено", sort_name: "Название",
+    date_relative: "Относительный", date_absolute: "Абсолютный",
+    theme_dark: "Стандартная (Тёмная)", theme_light: "Светлая",
+    theme_minimalism: "Минимализм", theme_liquid: "Ликуид"
+  },
+  en: {
+    nav_home: "Home", nav_browse: "Browse", nav_create: "Add Mod",
+    login: "Sign In", logout: "Sign Out", settings_saved: "Settings saved",
+    sync_ok: "Synced", sync_pending: "Syncing...",
+    // Admin panel
+    admin_title: "ModSphere Control Panel",
+    admin_subtitle: "Moderation, users, statistics, and platform settings.",
+    admin_sync: "Synchronize", admin_export: "Export JSON", admin_import: "Import JSON",
+    admin_approve_all: "Approve All", admin_tab_queue: "Queue", admin_tab_allmods: "All Mods",
+    admin_tab_users: "Users", admin_tab_stats: "Statistics", admin_tab_settings: "Settings",
+    admin_tab_logs: "Logs", admin_tab_reports: "Reports", admin_tab_notifications: "Notifications",
+    admin_tab_security: "Security", admin_tab_tools: "Tools",
+    admin_users_count: "Users", admin_projects_count: "Projects",
+    admin_pending: "Pending", admin_downloads: "Downloads",
+    admin_banned: "Banned", admin_new_week: "New this week",
+    admin_queue_empty: "Queue is empty",
+    admin_queue_empty_desc: "All uploaded projects have been reviewed and published.",
+    admin_search_users: "Search by username, email or UID...",
+    admin_search_mods: "Search mods by name, author...",
+    admin_all_roles: "All roles", admin_find: "Find",
+    admin_role_player: "Player", admin_role_moderator: "Moderator",
+    admin_role_admin: "Administrator", admin_role_owner: "Owner",
+    admin_approve: "Approve", admin_reject: "Reject",
+    admin_no_access: "No access", admin_author: "Author",
+    admin_top_authors: "Top Authors", admin_top_mods: "Top Mods",
+    admin_by_types: "By Types", admin_no_data: "No data",
+    admin_announcement: "Site Announcement", admin_maintenance: "Maintenance Mode",
+    admin_save_settings: "Save Settings", admin_log_empty: "Log is empty.",
+    admin_users_not_found: "Users not found.",
+    admin_mods_not_found: "Mods not found.",
+    admin_delete: "Delete", admin_ban: "Ban", admin_unban: "Unban",
+    admin_reset_password: "Reset Password", admin_profile: "Profile",
+    admin_featured: "★ Featured", admin_unfeatured: "Remove ★",
+    admin_reports_empty: "No reports",
+    admin_reports_empty_desc: "Users have not submitted any reports yet.",
+    admin_send_notification: "Send Notification",
+    admin_notif_title: "Title", admin_notif_message: "Message",
+    admin_notif_type: "Type", admin_notif_send: "Send to all",
+    admin_notif_history: "Notification History", admin_notif_empty: "No notifications sent.",
+    admin_security: "Security & Protection",
+    admin_ip_log: "Login History", admin_force_logout: "Force Logout All",
+    admin_2fa: "Two-Factor Authentication",
+    admin_tools: "Admin Tools",
+    admin_clear_cache: "Clear Cache", admin_rebuild_index: "Rebuild Index",
+    admin_export_users_csv: "Export Users CSV", admin_export_mods_csv: "Export Mods CSV",
+    admin_database_size: "Database Size",
+    admin_quick_actions: "Quick Actions",
+    // Settings
+    settings_title: "Site Settings",
+    settings_subtitle: "Choose language and theme. Changes are saved to your profile.",
+    settings_language: "Interface Language", settings_theme: "Theme (Site Style)",
+    settings_compact: "Compact Mode", settings_compact_desc: "Reduce interface padding",
+    settings_animations: "Animations", settings_animations_desc: "Enable interface animations",
+    settings_notifications: "Notifications", settings_notifications_desc: "Email notifications about moderation",
+    settings_default_sort: "Default Sort", settings_date_format: "Date Format",
+    settings_privacy: "Privacy", settings_show_profile: "Show profile publicly",
+    settings_show_email: "Show email in profile",
+    settings_show_activity: "Show activity",
+    settings_accessibility: "Accessibility",
+    settings_font_size: "Font Size",
+    settings_font_normal: "Normal", settings_font_large: "Large", settings_font_xl: "Extra Large",
+    settings_high_contrast: "High Contrast",
+    settings_danger_zone: "Danger Zone",
+    settings_clear_data: "Clear browsing data",
+    settings_clear_data_desc: "Clear recently viewed mods and favorites history.",
+    settings_apply: "Apply", settings_cancel: "Cancel",
+    // General
+    downloads: "Downloads", follows: "Followers",
+    sort_downloads: "Downloads", sort_follows: "Followers",
+    sort_updated: "Updated", sort_name: "Name",
+    date_relative: "Relative", date_absolute: "Absolute",
+    theme_dark: "Default (Dark)", theme_light: "Light",
+    theme_minimalism: "Minimalism", theme_liquid: "Liquid"
   }
+};
 
-  themeToggle.addEventListener("click", () => {
-    document.body.classList.toggle("light-theme");
-    const isLight = document.body.classList.contains("light-theme");
-    localStorage.setItem("theme", isLight ? "light" : "dark");
-    themeToggle.innerHTML = isLight ? '<i class="fa-solid fa-sun"></i>' : '<i class="fa-solid fa-moon"></i>';
-    showToast(isLight ? "Включена светлая тема" : "Включена темная тема", "info");
+function t(key) {
+  const currentUser = JSON.parse(localStorage.getItem("current_user") || "null");
+  const lang = currentUser?.settings?.language || localStorage.getItem("language") || "ru";
+  return (I18N[lang] && I18N[lang][key]) || I18N.ru[key] || key;
+}
+
+function applyUserSettings() {
+  const currentUser = JSON.parse(localStorage.getItem("current_user") || "null");
+  const settings = currentUser?.settings || {};
+  document.body.classList.toggle("compact-mode", !!settings.compactMode);
+  document.body.classList.toggle("no-animations", settings.animations === false);
+  document.body.classList.toggle("high-contrast", !!settings.highContrast);
+  document.body.classList.remove("font-normal", "font-large", "font-xl");
+  document.body.classList.add("font-" + (settings.fontSize || "normal"));
+  applyI18nNav();
+}
+
+function applyI18nNav() {
+  const map = [
+    ["nav-home", "nav_home"], ["nav-browse", "nav_browse"], ["nav-create", "nav_create"],
+    ["mobile-nav-home", "nav_home"], ["mobile-nav-browse", "nav_browse"], ["mobile-nav-create", "nav_create"]
+  ];
+  map.forEach(([id, key]) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const icon = el.querySelector("i");
+    const iconHtml = icon ? icon.outerHTML + " " : "";
+    const text = t(key);
+    if (el.classList.contains("mobile-nav-link")) {
+      el.innerHTML = `${iconHtml}<span>${text}</span>`;
+    } else {
+      el.innerHTML = `${iconHtml}${text}`;
+    }
   });
+}
+
+function updateSyncStatusIndicator() {
+  const el = document.getElementById("sync-status-indicator");
+  if (!el) return;
+  el.title = lastSyncTime ? `${t("sync_ok")}: ${formatRelativeTime(lastSyncTime)}` : t("sync_pending");
+  el.classList.toggle("synced", !!lastSyncTime);
+}
+
+function setupTheme() {
+  const currentUser = JSON.parse(localStorage.getItem("current_user"));
+  const savedTheme = currentUser?.settings?.theme || localStorage.getItem("theme") || "dark";
+  const themeToggle = document.getElementById("theme-toggle");
+  if (!themeToggle) return;
+  
+  document.body.classList.remove("light-theme", "theme-minimalism", "theme-liquid");
+  
+  const icons = {
+    light: '<i class="fa-solid fa-sun"></i>',
+    minimalism: '<i class="fa-solid fa-border-all"></i>',
+    liquid: '<i class="fa-solid fa-droplet"></i>',
+    dark: '<i class="fa-solid fa-moon"></i>'
+  };
+  
+  if (savedTheme === "light") document.body.classList.add("light-theme");
+  else if (savedTheme === "minimalism") document.body.classList.add("theme-minimalism");
+  else if (savedTheme === "liquid") document.body.classList.add("theme-liquid");
+  
+  themeToggle.innerHTML = icons[savedTheme] || icons.dark;
+  themeToggle.title = savedTheme === "minimalism" ? "Минимализм" : savedTheme === "liquid" ? "Ликуид" : "Переключить тему";
+
+  themeToggle.onclick = () => {
+    window.location.hash = "#/settings";
+  };
 }
 
 function setupRouting() {
@@ -216,14 +621,18 @@ function handleRoute() {
     state.filters.categories = parseArrayParam(params.categories);
     state.filters.loaders = parseArrayParam(params.loaders);
     state.filters.gameVersions = parseArrayParam(params.gameVersions);
+    state.filters.favorites = params.favorites === "1";
     
     renderBrowse();
   } else if (path.startsWith("#/mod/")) {
     const slug = path.replace("#/mod/", "");
     const mods = getMods();
     const mod = mods.find(m => m.slug === slug || m.id === slug);
+    if (mod && !mod.views) mod.views = 0;
+    if (mod) { mod.views++; localStorage.setItem("mods_data", JSON.stringify(mods)); }
     if (mod) {
       state.selectedModId = mod.id;
+      addRecentlyViewed(mod.id);
       renderModDetails(mod);
     } else {
       showToast("Мод не найден!", "info");
@@ -240,6 +649,8 @@ function handleRoute() {
     } else {
       renderCreateForm();
     }
+  } else if (path === "#/settings") {
+    renderSettingsPage();
   } else if (path === "#/admin") {
     const currentUser = JSON.parse(localStorage.getItem("current_user"));
     if (!currentUser || (currentUser.role !== "ADMIN" && currentUser.role !== "OWNER")) {
@@ -352,6 +763,14 @@ function setupGlobalEvents() {
     if (e.target === lightbox) lightbox.classList.remove("active");
   });
 
+  // Settings header button
+  const settingsHeaderBtn = document.getElementById("settings-header-btn");
+  if (settingsHeaderBtn) {
+    settingsHeaderBtn.addEventListener("click", () => {
+      window.location.hash = "#/settings";
+    });
+  }
+
   // Global click listener for author links to open their public profiles
   document.body.addEventListener("click", (e) => {
     const authorLink = e.target.closest(".author-link");
@@ -449,17 +868,35 @@ function renderHome() {
         <h2 class="section-title"><i class="fa-solid fa-fire"></i> Популярные проекты</h2>
         <a href="#/browse" class="view-all-link">Все проекты <i class="fa-solid fa-arrow-right"></i></a>
       </div>
-      <div class="mods-grid" id="trending-grid">
-        <!-- Rendered dynamically -->
+      <div class="mods-grid" id="trending-grid"></div>
+    </section>
+
+    <section id="recently-viewed-section" style="display:none; margin-top:48px;">
+      <div class="section-header">
+        <h2 class="section-title"><i class="fa-solid fa-clock-rotate-left"></i> Недавно просмотренные</h2>
       </div>
+      <div class="mods-grid" id="recently-viewed-grid"></div>
     </section>
   `;
 
   // Render trending cards
   const trendingGrid = document.getElementById("trending-grid");
-  trendingMods.forEach(mod => {
-    trendingGrid.appendChild(createModCard(mod));
-  });
+  const siteSettings = getSiteSettings();
+  const featuredIds = siteSettings.featuredModIds || [];
+  let displayMods = trendingMods;
+  if (featuredIds.length > 0) {
+    const featured = mods.filter(m => featuredIds.includes(m.id));
+    if (featured.length > 0) displayMods = featured.slice(0, 6);
+  }
+  displayMods.forEach(mod => trendingGrid.appendChild(createModCard(mod)));
+
+  const recentIds = JSON.parse(localStorage.getItem("recently_viewed") || "[]");
+  const recentMods = recentIds.map(id => mods.find(m => m.id === id)).filter(Boolean).slice(0, 4);
+  if (recentMods.length > 0) {
+    document.getElementById("recently-viewed-section").style.display = "block";
+    const recentGrid = document.getElementById("recently-viewed-grid");
+    recentMods.forEach(mod => recentGrid.appendChild(createModCard(mod)));
+  }
 
   // Wire up Spotlight Search events
   const heroSearchInput = document.getElementById("hero-search-input");
@@ -564,7 +1001,7 @@ function createModCard(mod) {
         ${renderAvatar(mod.avatar)}
       </div>
       <div class="mod-card-details">
-        <h3 class="mod-card-title">${mod.name}</h3>
+        <h3 class="mod-card-title">${mod.name}${isModNew(mod) ? ' <span class="badge-new">NEW</span>' : ''}</h3>
         <span class="mod-card-author">от <strong class="author-link">${mod.author}</strong>${getAuthorBadgeHTML(mod.author)}</span>
       </div>
     </div>
@@ -647,9 +1084,21 @@ function renderBrowse() {
             <span>Версии игры</span>
             <button class="clear-group-btn" id="clear-gameVersions">Сбросить</button>
           </div>
-          <div class="filter-options">
+          <div class="version-range-picker" style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+            <select class="form-input" id="filter-version-from" style="flex:1; min-width:90px; padding:6px 8px; font-size:12px;">
+              <option value="">От версии</option>
+              ${METADATA.gameVersions.map(v => `<option value="${v}">${v}</option>`).join("")}
+            </select>
+            <select class="form-input" id="filter-version-to" style="flex:1; min-width:90px; padding:6px 8px; font-size:12px;">
+              <option value="">До версии</option>
+              ${METADATA.gameVersions.map(v => `<option value="${v}">${v}</option>`).join("")}
+            </select>
+            <button type="button" class="btn btn-secondary btn-sm" id="filter-version-range-btn" style="white-space:nowrap;">Диапазон</button>
+          </div>
+          <input type="text" class="form-input" id="filter-version-search" placeholder="Поиск версии..." style="margin-bottom:8px; padding:6px 10px; font-size:12px;">
+          <div class="filter-options filter-options-scroll" id="version-filter-options">
             ${METADATA.gameVersions.map(version => `
-              <label class="filter-checkbox-label">
+              <label class="filter-checkbox-label version-filter-item" data-version="${version}">
                 <input type="checkbox" class="version-cb" value="${version}" ${state.filters.gameVersions.includes(version) ? 'checked' : ''}>
                 <span>${version}</span>
               </label>
@@ -752,6 +1201,33 @@ function renderBrowse() {
   setupClearBtn("clear-categories", ".category-cb", state.filters.categories);
   setupClearBtn("clear-gameVersions", ".version-cb", state.filters.gameVersions);
 
+  const versionSearch = document.getElementById("filter-version-search");
+  if (versionSearch) {
+    versionSearch.addEventListener("input", () => {
+      const q = versionSearch.value.trim().toLowerCase();
+      document.querySelectorAll(".version-filter-item").forEach(item => {
+        const ver = item.getAttribute("data-version") || "";
+        item.style.display = !q || ver.includes(q) ? "" : "none";
+      });
+    });
+  }
+
+  const rangeBtn = document.getElementById("filter-version-range-btn");
+  if (rangeBtn) {
+    rangeBtn.addEventListener("click", () => {
+      const from = document.getElementById("filter-version-from")?.value;
+      const to = document.getElementById("filter-version-to")?.value;
+      if (!from || !to) {
+        showToast("Выберите начальную и конечную версию", "info");
+        return;
+      }
+      const range = getVersionsInRange(from, to);
+      state.filters.gameVersions = [...new Set([...state.filters.gameVersions, ...range])];
+      syncGroupCheckbox(".version-cb", state.filters.gameVersions);
+      updateBrowseHash();
+    });
+  }
+
   // Search Input debounced
   const browseSearchInput = document.getElementById("browse-search-input");
   browseSearchInput.addEventListener("input", () => {
@@ -807,6 +1283,10 @@ function renderBrowseResults() {
   
   // Apply filtering
   let filtered = mods.filter(mod => {
+    if (state.filters.favorites) {
+      const followed = JSON.parse(localStorage.getItem("followed_mods") || "[]");
+      if (!followed.includes(mod.id)) return false;
+    }
     // 1. Search text
     if (state.filters.q) {
       const query = state.filters.q.toLowerCase();
@@ -990,8 +1470,17 @@ function renderModDetails(mod) {
   state.activeDetailTab = "description"; // Reset tab
 
   const followed = isModFollowed(mod.id);
+  const modUrl = `${window.location.origin}${window.location.pathname}#/mod/${mod.slug || mod.id}`;
+  const rating = getModRating(mod.id);
+  const newBadge = isModNew(mod) ? '<span class="badge-new">NEW</span>' : '';
 
   container.innerHTML = `
+    <nav class="breadcrumbs" aria-label="Навигация">
+      <a href="#/">Главная</a> <span>/</span>
+      <a href="#/browse">Обзор</a> <span>/</span>
+      <span>${mod.name}</span>
+    </nav>
+    <button class="btn btn-secondary btn-sm back-nav-btn" onclick="history.back()" style="margin-bottom:12px;"><i class="fa-solid fa-arrow-left"></i> Назад</button>
     <!-- Header -->
     <div class="mod-detail-header">
       <div class="mod-detail-icon" style="background-color: ${mod.iconColor || '#10b981'}">
@@ -999,8 +1488,11 @@ function renderModDetails(mod) {
       </div>
       <div class="mod-detail-meta">
         <div class="mod-detail-title-row">
-          <h1 class="mod-detail-title">${mod.name}</h1>
+          <h1 class="mod-detail-title">${mod.name} ${newBadge}</h1>
           <span class="result-badge-type">${METADATA.types[mod.type] || mod.type}</span>
+        </div>
+        <div class="mod-rating" id="mod-rating-stars" title="Оценка сообщества">
+          ${renderStarRating(rating)}
         </div>
         <p class="mod-detail-author-tag">от разработчика <span class="author-link">${mod.author}</span>${getAuthorBadgeHTML(mod.author)}</p>
         <p class="mod-detail-desc">${mod.shortDescription}</p>
@@ -1011,6 +1503,10 @@ function renderModDetails(mod) {
             <i class="${followed ? 'fa-solid' : 'fa-regular'} fa-heart"></i> 
             <span id="follow-text">${followed ? 'Вы подписаны' : 'В избранное'}</span>
           </button>
+          <button class="btn btn-secondary btn-sm" id="btn-copy-link" title="Копировать ссылку"><i class="fa-solid fa-link"></i></button>
+          <button class="btn btn-secondary btn-sm" id="btn-share-mod" title="Поделиться"><i class="fa-solid fa-share-nodes"></i></button>
+          <button class="btn btn-secondary btn-sm" id="btn-print-mod" title="Печать"><i class="fa-solid fa-print"></i></button>
+          <button class="btn btn-secondary btn-sm" id="btn-report-mod" title="Пожаловаться"><i class="fa-solid fa-flag"></i></button>
         </div>
       </div>
     </div>
@@ -1052,6 +1548,10 @@ function renderModDetails(mod) {
         <div class="sidebar-panel">
           <h3 class="sidebar-panel-title">Статистика</h3>
           <div class="metadata-table">
+            <div class="metadata-row">
+              <span class="metadata-label">Просмотры</span>
+              <span class="metadata-value">${formatNumberFull(mod.views || 0)}</span>
+            </div>
             <div class="metadata-row">
               <span class="metadata-label">Скачивания</span>
               <span class="metadata-value" id="detail-stat-downloads">${formatNumberFull(mod.downloads)}</span>
@@ -1127,6 +1627,38 @@ function renderModDetails(mod) {
     } else {
       showToast("Нет доступных версий файла!", "info");
     }
+  });
+
+  document.getElementById("btn-copy-link")?.addEventListener("click", () => {
+    copyTextToClipboard(modUrl);
+    showToast("Ссылка скопирована в буфер обмена", "success");
+  });
+
+  document.getElementById("btn-share-mod")?.addEventListener("click", async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: mod.name, text: mod.shortDescription, url: modUrl });
+      } catch (_) {}
+    } else {
+      copyTextToClipboard(modUrl);
+      showToast("Ссылка скопирована (Web Share недоступен)", "info");
+    }
+  });
+
+  document.getElementById("btn-print-mod")?.addEventListener("click", () => window.print());
+
+  document.getElementById("btn-report-mod")?.addEventListener("click", () => {
+    logActivity("mod_report", mod.name);
+    showToast("Жалоба отправлена модераторам. Спасибо!", "success");
+  });
+
+  document.getElementById("mod-rating-stars")?.addEventListener("click", (e) => {
+    const star = e.target.closest("[data-star]");
+    if (!star) return;
+    const value = parseInt(star.getAttribute("data-star"), 10);
+    setModRating(mod.id, value);
+    document.getElementById("mod-rating-stars").innerHTML = renderStarRating(value);
+    showToast(`Вы оценили мод на ${value}/5`, "success");
   });
 
   // Tab switcher
@@ -1428,9 +1960,22 @@ function renderCreateForm() {
           <!-- Game Versions -->
           <div class="form-group full-width">
             <label class="form-label">Поддерживаемые версии Minecraft</label>
-            <div class="form-checkbox-group">
+            <div class="version-range-picker" style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+              <select class="form-input" id="form-version-from" style="flex:1; min-width:120px; padding:8px;">
+                <option value="">От версии</option>
+                ${METADATA.gameVersions.map(v => `<option value="${v}">${v}</option>`).join("")}
+              </select>
+              <select class="form-input" id="form-version-to" style="flex:1; min-width:120px; padding:8px;">
+                <option value="">До версии</option>
+                ${METADATA.gameVersions.map(v => `<option value="${v}">${v}</option>`).join("")}
+              </select>
+              <button type="button" class="btn btn-secondary btn-sm" id="form-version-range-btn">Выбрать диапазон</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="form-version-clear-btn">Снять все</button>
+            </div>
+            <input type="text" class="form-input" id="form-version-search" placeholder="Поиск версии..." style="margin-bottom:8px;">
+            <div class="form-checkbox-group form-checkbox-scroll" id="form-version-list">
               ${METADATA.gameVersions.map(v => `
-                <label class="form-checkbox-label">
+                <label class="form-checkbox-label form-version-item" data-version="${v}">
                   <input type="checkbox" name="form-version" value="${v}">
                   <span>${v}</span>
                 </label>
@@ -1567,6 +2112,34 @@ function renderCreateForm() {
     window.location.hash = "#/";
   });
 
+  const formVersionSearch = document.getElementById("form-version-search");
+  if (formVersionSearch) {
+    formVersionSearch.addEventListener("input", () => {
+      const q = formVersionSearch.value.trim().toLowerCase();
+      document.querySelectorAll(".form-version-item").forEach(item => {
+        item.style.display = !q || (item.getAttribute("data-version") || "").includes(q) ? "" : "none";
+      });
+    });
+  }
+
+  document.getElementById("form-version-range-btn")?.addEventListener("click", () => {
+    const from = document.getElementById("form-version-from")?.value;
+    const to = document.getElementById("form-version-to")?.value;
+    if (!from || !to) {
+      showToast("Выберите начальную и конечную версию", "info");
+      return;
+    }
+    getVersionsInRange(from, to).forEach(v => {
+      const cb = document.querySelector(`input[name="form-version"][value="${v}"]`);
+      if (cb) cb.checked = true;
+    });
+    showToast(`Выбрано версий: ${getVersionsInRange(from, to).length}`, "success");
+  });
+
+  document.getElementById("form-version-clear-btn")?.addEventListener("click", () => {
+    document.querySelectorAll('input[name="form-version"]').forEach(cb => { cb.checked = false; });
+  });
+
   // Form Submission
   const form = document.getElementById("create-mod-form");
   form.addEventListener("submit", (e) => {
@@ -1625,6 +2198,7 @@ function renderCreateForm() {
     };
 
     saveMod(newMod);
+    logActivity("mod_create", newMod.name);
     showToast("Проект успешно создан и отправлен на модерацию!", "success");
 
     setTimeout(() => {
@@ -1635,9 +2209,32 @@ function renderCreateForm() {
 
 function formatDate(dateString) {
   if (!dateString) return "Неизвестно";
+  const currentUser = JSON.parse(localStorage.getItem("current_user") || "null");
+  if (currentUser?.settings?.dateFormat === "relative") {
+    return formatRelativeTime(dateString);
+  }
   const date = new Date(dateString);
   const options = { day: 'numeric', month: 'short', year: 'numeric' };
   return date.toLocaleDateString('ru-RU', options);
+}
+
+function formatRelativeTime(dateString) {
+  if (!dateString) return "недавно";
+  const diff = Date.now() - new Date(dateString).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "только что";
+  if (mins < 60) return `${mins} мин. назад`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} ч. назад`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} дн. назад`;
+  const date = new Date(dateString);
+  return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function isModNew(mod) {
+  if (!mod.createdAt) return false;
+  return (Date.now() - new Date(mod.createdAt).getTime()) < 7 * 24 * 60 * 60 * 1000;
 }
 
 function formatNumber(num) {
@@ -1702,8 +2299,11 @@ function renderUserAuth() {
           <div class="user-menu-divider"></div>
         ` : ''}
         <button class="user-menu-item" id="user-menu-my-projects"><i class="fa-solid fa-folder"></i> Мои проекты</button>
+        <button class="user-menu-item" id="user-menu-favorites"><i class="fa-solid fa-heart"></i> Избранные моды</button>
         <div class="user-menu-divider"></div>
         <button class="user-menu-item" id="user-menu-profile"><i class="fa-solid fa-user-gear"></i> Настройки профиля</button>
+        <div class="user-menu-divider"></div>
+        <button class="user-menu-item" id="user-menu-settings"><i class="fa-solid fa-gear"></i> Настройки сайта</button>
         <div class="user-menu-divider"></div>
         <button class="user-menu-item" id="user-menu-logout" style="color: #ef4444;"><i class="fa-solid fa-right-from-bracket"></i> Выйти</button>
       </div>
@@ -1731,9 +2331,15 @@ function renderUserAuth() {
       window.location.hash = `#/browse?q=${encodeURIComponent(currentUser.username)}`;
     });
 
+    document.getElementById("user-menu-favorites").addEventListener("click", () => {
+      window.location.hash = "#/browse?favorites=1";
+    });
+
     document.getElementById("user-menu-profile").addEventListener("click", () => {
       openProfileModal();
     });
+
+    document.getElementById("user-menu-settings").addEventListener("click", () => { window.location.hash = "#/settings"; });
 
     document.getElementById("user-menu-logout").addEventListener("click", () => {
       localStorage.removeItem("current_user");
@@ -1818,8 +2424,16 @@ function setupAuthModalEvents() {
       showToast("Неверный пароль!", "info");
       return;
     }
+
+    if (user.banned) {
+      showToast("Ваш аккаунт заблокирован администрацией.", "error");
+      return;
+    }
     
     localStorage.setItem("current_user", JSON.stringify(user));
+    setupTheme();
+    applyUserSettings();
+    window.logActivity("user_login", user.username);
     showToast(`Рады видеть вас снова, ${user.username}!`, "success");
     closeAuthModal();
     renderUserAuth();
@@ -2011,6 +2625,255 @@ function openProfileModal() {
 
 function closeProfileModal() {
   document.getElementById("profile-modal").classList.remove("active");
+}
+
+
+function setupSettingsModalEvents() {
+  const backdrop = document.getElementById("settings-modal-backdrop");
+  const closeBtn = document.getElementById("settings-modal-close-btn");
+  const cancelBtn = document.getElementById("btn-settings-close");
+  const saveBtn = document.getElementById("btn-settings-save");
+  const themeSelect = document.getElementById("settings-theme");
+  const langSelect = document.getElementById("settings-language");
+  const compactToggle = document.getElementById("settings-compact");
+  const animToggle = document.getElementById("settings-animations");
+  const notifyToggle = document.getElementById("settings-notifications");
+  const defaultSort = document.getElementById("settings-default-sort");
+  const dateFormat = document.getElementById("settings-date-format");
+  const showProfileToggle = document.getElementById("settings-show-profile");
+  const showEmailToggle = document.getElementById("settings-show-email");
+  const showActivityToggle = document.getElementById("settings-show-activity");
+  const fontSizeSelect = document.getElementById("settings-font-size");
+  const highContrastToggle = document.getElementById("settings-high-contrast");
+  const clearDataBtn = document.getElementById("btn-clear-browsing-data");
+  const modal = document.getElementById("settings-modal");
+
+  const closeSettings = () => modal.style.display = "none";
+  const openSettings = () => {
+    const currentUser = JSON.parse(localStorage.getItem("current_user"));
+    const s = currentUser?.settings || {};
+    themeSelect.value = s.theme || localStorage.getItem("theme") || "dark";
+    langSelect.value = s.language || "ru";
+    if (compactToggle) compactToggle.checked = !!s.compactMode;
+    if (animToggle) animToggle.checked = s.animations !== false;
+    if (notifyToggle) notifyToggle.checked = !!s.notifications;
+    if (defaultSort) defaultSort.value = s.defaultSort || "downloads";
+    if (dateFormat) dateFormat.value = s.dateFormat || "relative";
+    if (showProfileToggle) showProfileToggle.checked = s.showProfile !== false;
+    if (showEmailToggle) showEmailToggle.checked = !!s.showEmail;
+    if (showActivityToggle) showActivityToggle.checked = s.showActivity !== false;
+    if (fontSizeSelect) fontSizeSelect.value = s.fontSize || "normal";
+    if (highContrastToggle) highContrastToggle.checked = !!s.highContrast;
+    modal.style.display = "block";
+  };
+
+  if (backdrop) backdrop.addEventListener("click", closeSettings);
+  if (closeBtn) closeBtn.addEventListener("click", closeSettings);
+  if (cancelBtn) cancelBtn.addEventListener("click", closeSettings);
+
+  if (clearDataBtn) {
+    clearDataBtn.addEventListener("click", () => {
+      localStorage.removeItem("recently_viewed");
+      localStorage.removeItem("followed_mods");
+      localStorage.removeItem("mod_ratings");
+      showToast("История просмотров и избранное очищены", "success");
+    });
+  }
+
+  if (saveBtn) {
+    saveBtn.addEventListener("click", () => {
+      const currentUser = JSON.parse(localStorage.getItem("current_user"));
+      const settingsPayload = {
+        theme: themeSelect.value,
+        language: langSelect.value,
+        compactMode: compactToggle?.checked || false,
+        animations: animToggle ? animToggle.checked : true,
+        notifications: notifyToggle?.checked || false,
+        defaultSort: defaultSort?.value || "downloads",
+        dateFormat: dateFormat?.value || "relative",
+        showProfile: showProfileToggle ? showProfileToggle.checked : true,
+        showEmail: showEmailToggle?.checked || false,
+        showActivity: showActivityToggle ? showActivityToggle.checked : true,
+        fontSize: fontSizeSelect?.value || "normal",
+        highContrast: highContrastToggle?.checked || false
+      };
+      if (currentUser) {
+        currentUser.settings = { ...(currentUser.settings || {}), ...settingsPayload };
+        touchUserUpdated(currentUser);
+        localStorage.setItem("current_user", JSON.stringify(currentUser));
+        const users = JSON.parse(localStorage.getItem("registered_users") || "[]");
+        const uIndex = users.findIndex(u => u.uid === currentUser.uid);
+        if (uIndex > -1) {
+          users[uIndex].settings = currentUser.settings;
+          touchUserUpdated(users[uIndex]);
+          localStorage.setItem("registered_users", JSON.stringify(users));
+        }
+      } else {
+        localStorage.setItem("theme", settingsPayload.theme);
+        localStorage.setItem("language", settingsPayload.language);
+      }
+      setupTheme();
+      applyUserSettings();
+      if (settingsPayload.defaultSort) state.filters.sort = settingsPayload.defaultSort;
+      document.body.classList.toggle("high-contrast", !!settingsPayload.highContrast);
+      document.body.classList.remove("font-normal", "font-large", "font-xl");
+      document.body.classList.add("font-" + (settingsPayload.fontSize || "normal"));
+      showToast(t("settings_saved"), "success");
+      logActivity("settings_update", JSON.stringify(settingsPayload));
+      closeSettings();
+    });
+  }
+
+  window.openSettingsModal = openSettings;
+}
+
+function renderSettingsPage() {
+  const container = document.getElementById("main-content");
+  const currentUser = JSON.parse(localStorage.getItem("current_user"));
+  const s = currentUser?.settings || {};
+
+  container.innerHTML = `
+    <div class="settings-page">
+      <div class="settings-page-header">
+        <h1><i class="fa-solid fa-sliders" style="color:var(--primary-color); margin-right:10px;"></i>Настройки</h1>
+        <p>Язык, тема, приватность и доступность</p>
+      </div>
+
+      <div class="settings-page-grid">
+        <div class="settings-page-section">
+          <h3><i class="fa-solid fa-globe"></i> Язык интерфейса</h3>
+          <select class="form-input" id="sp-lang">
+            <option value="ru" ${(s.language || "ru") === "ru" ? "selected" : ""}>Русский</option>
+            <option value="en" ${s.language === "en" ? "selected" : ""}>English</option>
+          </select>
+        </div>
+
+        <div class="settings-page-section">
+          <h3><i class="fa-solid fa-palette"></i> Тема оформления</h3>
+          <select class="form-input" id="sp-theme">
+            <option value="dark" ${(s.theme || "dark") === "dark" ? "selected" : ""}>Стандартная (Тёмная)</option>
+            <option value="light" ${s.theme === "light" ? "selected" : ""}>Светлая</option>
+            <option value="minimalism" ${s.theme === "minimalism" ? "selected" : ""}>Минимализм</option>
+            <option value="liquid" ${s.theme === "liquid" ? "selected" : ""}>Ликуид</option>
+          </select>
+        </div>
+
+        <div class="settings-page-section">
+          <h3><i class="fa-solid fa-compress"></i> Компактный режим</h3>
+          <label class="form-checkbox-label"><input type="checkbox" id="sp-compact" ${s.compactMode ? "checked" : ""}> Уменьшить отступы</label>
+        </div>
+
+        <div class="settings-page-section">
+          <h3><i class="fa-solid fa-wand-magic-sparkles"></i> Анимации</h3>
+          <label class="form-checkbox-label"><input type="checkbox" id="sp-anim" ${s.animations !== false ? "checked" : ""}> Включить анимации</label>
+        </div>
+
+        <div class="settings-page-section">
+          <h3><i class="fa-solid fa-bell"></i> Уведомления</h3>
+          <label class="form-checkbox-label"><input type="checkbox" id="sp-notif" ${s.notifications ? "checked" : ""}> Email-уведомления о модерации</label>
+        </div>
+
+        <div class="settings-page-section">
+          <h3><i class="fa-solid fa-arrow-down-wide-short"></i> Сортировка по умолчанию</h3>
+          <select class="form-input" id="sp-sort">
+            <option value="downloads" ${(s.defaultSort || "downloads") === "downloads" ? "selected" : ""}>Скачивания</option>
+            <option value="follows" ${s.defaultSort === "follows" ? "selected" : ""}>Подписчики</option>
+            <option value="updated" ${s.defaultSort === "updated" ? "selected" : ""}>Обновлено</option>
+            <option value="relevance" ${s.defaultSort === "relevance" ? "selected" : ""}>Название</option>
+          </select>
+        </div>
+
+        <div class="settings-page-section">
+          <h3><i class="fa-solid fa-clock"></i> Формат дат</h3>
+          <select class="form-input" id="sp-datefmt">
+            <option value="relative" ${(s.dateFormat || "relative") === "relative" ? "selected" : ""}>Относительный</option>
+            <option value="absolute" ${s.dateFormat === "absolute" ? "selected" : ""}>Абсолютный</option>
+          </select>
+        </div>
+
+        <div class="settings-page-section settings-page-section-full">
+          <h3><i class="fa-solid fa-shield"></i> Приватность</h3>
+          <div class="settings-page-checkboxes">
+            <label class="form-checkbox-label"><input type="checkbox" id="sp-show-profile" ${s.showProfile !== false ? "checked" : ""}> Показывать профиль публично</label>
+            <label class="form-checkbox-label"><input type="checkbox" id="sp-show-email" ${s.showEmail ? "checked" : ""}> Показывать email в профиле</label>
+            <label class="form-checkbox-label"><input type="checkbox" id="sp-show-activity" ${s.showActivity !== false ? "checked" : ""}> Показывать активность</label>
+          </div>
+        </div>
+
+        <div class="settings-page-section settings-page-section-full">
+          <h3><i class="fa-solid fa-universal-access"></i> Доступность</h3>
+          <div class="settings-page-inline">
+            <label class="form-label" style="font-size:13px;">Размер шрифта</label>
+            <select class="form-input" id="sp-fontsize" style="width:200px;">
+              <option value="normal" ${(s.fontSize || "normal") === "normal" ? "selected" : ""}>Обычный</option>
+              <option value="large" ${s.fontSize === "large" ? "selected" : ""}>Крупный</option>
+              <option value="xl" ${s.fontSize === "xl" ? "selected" : ""}>Очень крупный</option>
+            </select>
+          </div>
+          <label class="form-checkbox-label" style="margin-top:8px;"><input type="checkbox" id="sp-contrast" ${s.highContrast ? "checked" : ""}> Повышенный контраст</label>
+        </div>
+
+        <div class="settings-page-section settings-page-section-full settings-page-danger">
+          <h3 style="color:#ef4444;"><i class="fa-solid fa-triangle-exclamation"></i> Опасная зона</h3>
+          <p style="color:var(--text-secondary); font-size:13px; margin-bottom:12px;">Очистить историю просмотров и избранное.</p>
+          <button class="btn btn-danger btn-sm" id="sp-clear-data"><i class="fa-solid fa-eraser"></i> Очистить просмотры</button>
+        </div>
+      </div>
+
+      <div class="settings-page-actions">
+        <button class="btn btn-secondary" onclick="window.location.hash='#/'"><i class="fa-solid fa-xmark"></i> Отмена</button>
+        <button class="btn btn-primary" id="sp-save-btn"><i class="fa-solid fa-check"></i> Сохранить настройки</button>
+      </div>
+    </div>
+  `;
+
+  // Wire up clear data
+  document.getElementById("sp-clear-data")?.addEventListener("click", () => {
+    localStorage.removeItem("recently_viewed");
+    localStorage.removeItem("followed_mods");
+    localStorage.removeItem("mod_ratings");
+    showToast("История просмотров и избранное очищены", "success");
+  });
+
+  // Wire up save
+  document.getElementById("sp-save-btn")?.addEventListener("click", () => {
+    const payload = {
+      theme: document.getElementById("sp-theme").value,
+      language: document.getElementById("sp-lang").value,
+      compactMode: document.getElementById("sp-compact").checked,
+      animations: document.getElementById("sp-anim").checked,
+      notifications: document.getElementById("sp-notif").checked,
+      defaultSort: document.getElementById("sp-sort").value,
+      dateFormat: document.getElementById("sp-datefmt").value,
+      showProfile: document.getElementById("sp-show-profile").checked,
+      showEmail: document.getElementById("sp-show-email").checked,
+      showActivity: document.getElementById("sp-show-activity").checked,
+      fontSize: document.getElementById("sp-fontsize").value,
+      highContrast: document.getElementById("sp-contrast").checked
+    };
+
+    if (currentUser) {
+      currentUser.settings = { ...(currentUser.settings || {}), ...payload };
+      touchUserUpdated(currentUser);
+      localStorage.setItem("current_user", JSON.stringify(currentUser));
+      const users = JSON.parse(localStorage.getItem("registered_users") || "[]");
+      const idx = users.findIndex(u => u.uid === currentUser.uid);
+      if (idx > -1) {
+        users[idx].settings = currentUser.settings;
+        touchUserUpdated(users[idx]);
+        localStorage.setItem("registered_users", JSON.stringify(users));
+      }
+    } else {
+      localStorage.setItem("theme", payload.theme);
+      localStorage.setItem("language", payload.language);
+    }
+
+    setupTheme();
+    applyUserSettings();
+    if (payload.defaultSort) state.filters.sort = payload.defaultSort;
+    logActivity("settings_update", JSON.stringify(payload));
+    showToast("Настройки сохранены", "success");
+  });
 }
 
 function setupProfileModalEvents() {
@@ -2584,27 +3447,79 @@ function createSpotlightResultItem(mod) {
 }
 
 // --- VIEW 5: ADMIN MANAGEMENT PANEL ---
-function renderAdminPanel(activeTab = "mods") {
+function renderAdminPanel(activeTab = "mods", searchQuery = "", modSearchQuery = "", roleFilter = "") {
   const container = document.getElementById("main-content");
   const users = JSON.parse(localStorage.getItem("registered_users") || "[]");
   const mods = getMods();
   const pendingMods = mods.filter(m => !m.approved);
   const currentUser = JSON.parse(localStorage.getItem("current_user"));
+  const siteSettings = getSiteSettings();
+  const activityLog = JSON.parse(localStorage.getItem("activity_log") || "[]");
+  
+  if (!currentUser || (currentUser.role !== "ADMIN" && currentUser.role !== "OWNER")) {
+    window.location.hash = "#/";
+    return;
+  }
 
+  let filteredUsers = users;
+  if (searchQuery) {
+    const q = searchQuery.toLowerCase();
+    filteredUsers = filteredUsers.filter(u =>
+      u.username.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || (u.uid || "").includes(q)
+    );
+  }
+  if (roleFilter) {
+    filteredUsers = filteredUsers.filter(u => (u.role || "PLAYER").toUpperCase() === roleFilter.toUpperCase());
+  }
+
+  let filteredModsList = mods;
+  if (modSearchQuery) {
+    const q = modSearchQuery.toLowerCase();
+    filteredModsList = mods.filter(m =>
+      m.name.toLowerCase().includes(q) || m.author.toLowerCase().includes(q) || (m.id || "").includes(q)
+    );
+  }
+
+  const featuredIds = siteSettings.featuredModIds || [];
+  const totalDownloads = mods.reduce((sum, m) => sum + (m.downloads || 0), 0);
+  const bannedCount = users.filter(u => u.banned).length;
+  const newUsersWeek = users.filter(u => u.updatedAt && (Date.now() - new Date(u.updatedAt).getTime()) < 7 * 86400000).length;
+  
   container.innerHTML = `
     <div class="admin-panel-container">
       <div class="admin-panel-header">
         <h2><i class="fa-solid fa-crown" style="color: var(--primary-color); margin-right: 8px;"></i>Панель управления ModSphere</h2>
-        <p>Модерация публикуемых файлов и выдача титулов (ролей) пользователям платформы.</p>
+        <p>Модерация, пользователи, статистика и настройки платформы.</p>
+        <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;">
+          <button class="btn btn-secondary btn-sm" onclick="syncPull(false).then(() => showToast('Данные синхронизированы', 'success'))"><i class="fa-solid fa-rotate"></i> Синхронизировать</button>
+          <button class="btn btn-secondary btn-sm" onclick="exportAdminData()"><i class="fa-solid fa-file-export"></i> Экспорт JSON</button>
+          <button class="btn btn-secondary btn-sm" onclick="document.getElementById('admin-import-file').click()"><i class="fa-solid fa-file-import"></i> Импорт JSON</button>
+          <input type="file" id="admin-import-file" accept="application/json" style="display:none" onchange="importAdminData(event)">
+          ${pendingMods.length > 0 ? `<button class="btn btn-primary btn-sm" onclick="bulkApproveMods()"><i class="fa-solid fa-check-double"></i> Одобрить все (${pendingMods.length})</button>` : ''}
+        </div>
+      </div>
+      
+      <div class="admin-dashboard-stats" style="display:flex; gap:16px; margin-bottom: 24px; flex-wrap:wrap;">
+        <div class="admin-stat-card"><div class="admin-stat-num">${users.length}</div><div class="admin-stat-label">Пользователей</div></div>
+        <div class="admin-stat-card"><div class="admin-stat-num">${mods.length}</div><div class="admin-stat-label">Проектов</div></div>
+        <div class="admin-stat-card"><div class="admin-stat-num">${pendingMods.length}</div><div class="admin-stat-label">На модерации</div></div>
+        <div class="admin-stat-card"><div class="admin-stat-num">${formatNumberFull(totalDownloads)}</div><div class="admin-stat-label">Скачиваний</div></div>
+        <div class="admin-stat-card"><div class="admin-stat-num">${bannedCount}</div><div class="admin-stat-label">Заблокировано</div></div>
+        <div class="admin-stat-card"><div class="admin-stat-num">${newUsersWeek}</div><div class="admin-stat-label">Новых за неделю</div></div>
       </div>
 
       <div class="admin-tabs">
-        <button class="admin-tab-btn ${activeTab === 'mods' ? 'active' : ''}" id="admin-tab-mods-btn">
-          <i class="fa-solid fa-file-shield"></i> Проекты на проверку (${pendingMods.length})
-        </button>
-        <button class="admin-tab-btn ${activeTab === 'users' ? 'active' : ''}" id="admin-tab-users-btn">
-          <i class="fa-solid fa-users-gear"></i> Пользователи (${users.length})
-        </button>
+        <button class="admin-tab-btn ${activeTab === 'mods' ? 'active' : ''}" onclick="renderAdminPanel('mods')"><i class="fa-solid fa-file-shield"></i> Очередь (${pendingMods.length})</button>
+        <button class="admin-tab-btn ${activeTab === 'allmods' ? 'active' : ''}" onclick="renderAdminPanel('allmods')"><i class="fa-solid fa-cubes"></i> Все моды (${mods.length})</button>
+        <button class="admin-tab-btn ${activeTab === 'users' ? 'active' : ''}" onclick="renderAdminPanel('users')"><i class="fa-solid fa-users-gear"></i> Пользователи (${users.length})</button>
+        <button class="admin-tab-btn ${activeTab === 'stats' ? 'active' : ''}" onclick="renderAdminPanel('stats')"><i class="fa-solid fa-chart-line"></i> Статистика</button>
+        <button class="admin-tab-btn ${activeTab === 'settings' ? 'active' : ''}" onclick="renderAdminPanel('settings')"><i class="fa-solid fa-sliders"></i> Настройки</button>
+        <button class="admin-tab-btn ${activeTab === 'logs' ? 'active' : ''}" onclick="renderAdminPanel('logs')"><i class="fa-solid fa-list"></i> Журнал</button>
+        <button class="admin-tab-btn ${activeTab === 'reports' ? 'active' : ''}" onclick="renderAdminPanel('reports')"><i class="fa-solid fa-flag"></i> Жалобы</button>
+        <button class="admin-tab-btn ${activeTab === 'notifications' ? 'active' : ''}" onclick="renderAdminPanel('notifications')"><i class="fa-solid fa-bell"></i> Уведомления</button>
+        <button class="admin-tab-btn ${activeTab === 'security' ? 'active' : ''}" onclick="renderAdminPanel('security')"><i class="fa-solid fa-shield"></i> Безопасность</button>
+        <button class="admin-tab-btn ${activeTab === 'tools' ? 'active' : ''}" onclick="renderAdminPanel('tools')"><i class="fa-solid fa-screwdriver-wrench"></i> Инструменты</button>
+        <button class="admin-tab-btn ${activeTab === 'system' ? 'active' : ''}" onclick="renderAdminPanel('system')"><i class="fa-solid fa-server"></i> Система</button>
       </div>
 
       <!-- Projects Moderation Tab Content -->
@@ -2630,9 +3545,8 @@ function renderAdminPanel(activeTab = "mods") {
                         <h3 class="admin-pending-title">${mod.name}</h3>
                         <span class="result-badge-type">${METADATA.types[mod.type] || mod.type}</span>
                       </div>
-                      <p class="admin-pending-author">Автор: <strong class="author-link">${mod.author}</strong>${getAuthorBadgeHTML(mod.author)}</p>
+                      <p class="admin-pending-author">Автор: <strong class="author-link">${mod.author}</strong></p>
                       <p class="admin-pending-desc">${mod.shortDescription}</p>
-                      
                       ${mainFile ? `
                         <div class="admin-file-details">
                           <i class="fa-solid fa-paperclip"></i>
@@ -2641,21 +3555,18 @@ function renderAdminPanel(activeTab = "mods") {
                       ` : ''}
                     </div>
                   </div>
-                  
                   <div class="admin-pending-actions">
                     ${mainFile ? `
-                      <button class="btn btn-secondary btn-sm btn-download-pending" data-id="${mod.id}" title="Скачать файл для проверки">
-                        <i class="fa-solid fa-download"></i> Скачать файл
+                      <button class="btn btn-secondary btn-sm" onclick="triggerVersionDownload(getMods().find(m=>m.id==='${mod.id}'), getMods().find(m=>m.id==='${mod.id}').versions[0])" title="Скачать файл для проверки">
+                        <i class="fa-solid fa-download"></i>
                       </button>
                     ` : ''}
-                    <div style="display:flex; gap:8px;">
-                      <button class="btn btn-primary btn-sm btn-approve-pending" data-id="${mod.id}" style="background-color: var(--primary-color); flex:1; justify-content:center;">
-                        <i class="fa-solid fa-check"></i> Одобрить
-                      </button>
-                      <button class="btn btn-secondary btn-sm btn-reject-pending" data-id="${mod.id}" style="border-color:#ef4444; color:#ef4444; flex:1; justify-content:center;">
-                        <i class="fa-solid fa-xmark"></i> Отклонить
-                      </button>
-                    </div>
+                    <button class="btn btn-primary btn-sm" onclick="approvePendingMod('${mod.id}')">
+                      <i class="fa-solid fa-check"></i> Одобрить
+                    </button>
+                    <button class="btn btn-danger btn-sm" onclick="rejectPendingMod('${mod.id}')">
+                      <i class="fa-solid fa-xmark"></i> Отклонить
+                    </button>
                   </div>
                 </div>
               `;
@@ -2664,184 +3575,294 @@ function renderAdminPanel(activeTab = "mods") {
         `}
       </div>
 
+      <!-- All Mods Tab Content -->
+      <div class="admin-tab-content ${activeTab === 'allmods' ? 'active' : ''}" style="display: ${activeTab === 'allmods' ? 'block' : 'none'};">
+        <div style="margin-bottom: 16px; display:flex; gap:8px;">
+          <input type="text" id="admin-mod-search" class="form-input" placeholder="Поиск модов по названию, автору..." value="${modSearchQuery}" style="flex:1;">
+          <button class="btn btn-primary" onclick="renderAdminPanel('allmods', '', document.getElementById('admin-mod-search').value)"><i class="fa-solid fa-search"></i></button>
+        </div>
+        <div class="admin-users-list" style="margin-top:16px;">
+          ${filteredModsList.map(mod => `
+            <div class="admin-user-item">
+              <div class="admin-user-info" style="display:flex; align-items:center; gap:12px;">
+                <div style="width:40px; height:40px; border-radius:8px; overflow:hidden;">${renderAvatar(mod.avatar)}</div>
+                <div>
+                  <div style="font-weight:700;">${mod.name} ${mod.approved ? '<i class="fa-solid fa-check-circle" style="color:var(--primary-color); font-size:12px;"></i>' : '<i class="fa-solid fa-clock" style="color:#f59e0b; font-size:12px;"></i>'} ${featuredIds.includes(mod.id) ? '<span class="badge-featured">★</span>' : ''}</div>
+                  <div style="font-size:12px; color:var(--text-secondary);">Автор: <span class="author-link" style="font-weight:600;">${mod.author}</span>${getAuthorBadgeHTML(mod.author)} | Скачиваний: ${mod.downloads || 0}</div>
+                </div>
+              </div>
+              <div class="admin-user-actions">
+                <button class="btn btn-secondary btn-sm" onclick="toggleFeaturedMod('${mod.id}')" title="В избранное на главной">${featuredIds.includes(mod.id) ? 'Убрать ★' : '★ На главную'}</button>
+                ${!mod.approved ? `<button class="btn btn-primary btn-sm" onclick="approvePendingMod('${mod.id}')">Одобрить</button>` : ''}
+                <button class="btn btn-danger btn-sm" onclick="deleteModAdmin('${mod.id}')">Удалить</button>
+              </div>
+            </div>
+          `).join('')}
+          ${filteredModsList.length === 0 ? '<div style="text-align:center; padding:20px; color:var(--text-muted);">Моды не найдены.</div>' : ''}
+        </div>
+      </div>
+
       <!-- Users Management Tab Content -->
       <div class="admin-tab-content ${activeTab === 'users' ? 'active' : ''}" id="admin-content-users" style="display: ${activeTab === 'users' ? 'block' : 'none'};">
-        <div class="admin-users-table-container">
-          <table class="admin-users-table">
-            <thead>
-              <tr>
-                <th>Пользователь</th>
-                <th>UID</th>
-                <th>Email</th>
-                <th>Роль</th>
-                <th>Действия (Изменить роль)</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${users.map(user => {
-                const isSelf = currentUser && currentUser.uid === user.uid;
-                const isOwner = user.role === 'OWNER';
-                return `
-                  <tr>
-                    <td>
-                      <div style="display:flex; align-items:center; gap:8px;">
-                        <img src="${user.avatar || 'https://api.dicebear.com/7.x/pixel-art/svg?seed=' + user.username}" alt="Avatar" class="user-avatar" style="width:28px; height:28px;">
-                        <strong class="admin-username-display" data-uid="${user.uid}">${user.username}</strong>
-                        ${(!isSelf && !(isOwner && currentUser.role !== 'OWNER')) ? `
-                          <button class="btn btn-secondary btn-sm btn-edit-username" data-uid="${user.uid}" title="Редактировать ник" style="padding: 2px 6px; font-size: 11px; margin-left: 6px; display:inline-flex; align-items:center; justify-content:center;">
-                            <i class="fa-solid fa-pen" style="font-size:10px;"></i>
-                          </button>
-                        ` : ''}
-                      </div>
-                    </td>
-                    <td><code style="color:var(--text-muted); font-size:12px;">${user.uid || 'XXXX'}</code></td>
-                    <td>${user.email}</td>
-                    <td>${getRoleBadgeHTML(user.role)}</td>
-                    <td>
-                      ${isSelf ? `
-                        <span style="font-size:12px; color:var(--text-muted);">Вы сами (нельзя изменить)</span>
-                      ` : (isOwner && currentUser.role !== 'OWNER') ? `
-                        <span style="font-size:12px; color:var(--text-muted);">Владелец (нельзя изменить)</span>
-                      ` : `
-                        <select class="admin-role-select" data-uid="${user.uid}" style="background:var(--bg-color); border:1px solid var(--border-color); color:var(--text-primary); padding:4px 8px; border-radius:var(--radius-sm); font-size:13px; cursor:pointer;">
-                          <option value="PLAYER" ${user.role === 'PLAYER' ? 'selected' : ''}>Игрок (PLAYER)</option>
-                          <option value="ADMIN" ${user.role === 'ADMIN' ? 'selected' : ''}>Администратор (ADMIN)</option>
-                          <option value="OWNER" ${user.role === 'OWNER' ? 'selected' : ''}>Владелец (OWNER)</option>
-                        </select>
-                      `}
-                    </td>
-                  </tr>
-                `;
-              }).join("")}
-            </tbody>
-          </table>
+        <div style="margin-bottom: 16px; display:flex; gap:8px; flex-wrap:wrap;">
+            <input type="text" id="admin-user-search" class="form-input" placeholder="Поиск по никнейму, email или UID..." value="${searchQuery}" style="flex:1; min-width:200px;">
+            <select id="admin-user-role-filter" class="form-input" style="width:140px; padding:8px;" onchange="renderAdminPanel('users', document.getElementById('admin-user-search').value, '', this.value)">
+              <option value="">Все роли</option>
+              <option value="PLAYER" ${roleFilter === 'PLAYER' ? 'selected' : ''}>PLAYER</option>
+              <option value="ADMIN" ${roleFilter === 'ADMIN' ? 'selected' : ''}>ADMIN</option>
+              <option value="OWNER" ${roleFilter === 'OWNER' ? 'selected' : ''}>OWNER</option>
+              <option value="MODERATOR" ${roleFilter === 'MODERATOR' ? 'selected' : ''}>MODERATOR</option>
+            </select>
+            <button class="btn btn-primary" onclick="renderAdminPanel('users', document.getElementById('admin-user-search').value, '', document.getElementById('admin-user-role-filter').value)"><i class="fa-solid fa-search"></i> Найти</button>
         </div>
+        <div class="admin-users-list">
+          ${filteredUsers.map(u => `
+            <div class="admin-user-item ${u.banned ? 'banned' : ''}" style="${u.banned ? 'opacity:0.6;' : ''}">
+              <div class="admin-user-avatar">
+                <img src="${u.avatar || 'https://api.dicebear.com/7.x/pixel-art/svg?seed=' + u.username}" alt="Avatar">
+              </div>
+              <div class="admin-user-info">
+                <div class="admin-user-name">${u.username} ${getRoleBadgeHTML(u.role)} ${u.banned ? '<span class="badge-banned">ЗАБЛОКИРОВАН</span>' : ''}</div>
+                <div class="admin-user-email">${u.email} &bull; <span style="font-family:monospace; color:var(--text-muted);">UID: ${u.uid}</span> &bull; ${u.updatedAt ? formatRelativeTime(u.updatedAt) : '—'}</div>
+              </div>
+              <div class="admin-user-actions">
+                <button class="btn btn-secondary btn-sm" onclick="openPublicProfileModal('${u.username.replace(/'/g, "\\'")}')" title="Профиль"><i class="fa-solid fa-eye"></i></button>
+                ${currentUser.role === 'OWNER' || (currentUser.role === 'ADMIN' && u.role !== 'OWNER' && u.uid !== currentUser.uid) ? `
+                  <select class="form-input" style="padding: 4px 8px; font-size: 12px; width: 120px;" onchange="changeUserRole('${u.uid}', this.value)">
+                    <option value="PLAYER" ${(u.role === 'PLAYER' || u.role === 'USER') ? 'selected' : ''}>Игрок</option>
+                    <option value="MODERATOR" ${u.role === 'MODERATOR' ? 'selected' : ''}>Модератор</option>
+                    <option value="ADMIN" ${u.role === 'ADMIN' ? 'selected' : ''}>Администратор</option>
+                    ${currentUser.role === 'OWNER' ? `<option value="OWNER" ${u.role === 'OWNER' ? 'selected' : ''}>Владелец</option>` : ''}
+                  </select>
+                  <button class="btn btn-${u.banned ? 'primary' : 'danger'} btn-sm" onclick="toggleUserBan('${u.uid}')" title="${u.banned ? 'Разблокировать' : 'Заблокировать'}">
+                    <i class="fa-solid ${u.banned ? 'fa-unlock' : 'fa-ban'}"></i>
+                  </button>
+                  <button class="btn btn-secondary btn-sm" onclick="resetUserPassword('${u.uid}')" title="Сброс пароля"><i class="fa-solid fa-key"></i></button>
+                  <button class="btn btn-secondary btn-sm" onclick="deleteUserAdmin('${u.uid}')" title="Удалить"><i class="fa-solid fa-trash"></i></button>
+                ` : `<span style="font-size: 12px; color: var(--text-muted);"><i class="fa-solid fa-lock"></i> Нет доступа</span>`}
+              </div>
+            </div>
+          `).join("")}
+          ${filteredUsers.length === 0 ? '<div style="text-align:center; padding:20px; color:var(--text-muted);">Пользователи не найдены.</div>' : ''}
+        </div>
+      </div>
+
+      <div class="admin-tab-content ${activeTab === 'stats' ? 'active' : ''}" style="display: ${activeTab === 'stats' ? 'block' : 'none'};">
+        <div class="admin-stats-grid">
+          <div class="admin-stats-block"><h4>Топ авторов</h4>${getTopAuthors(mods).map(a => `<div class="admin-stats-row"><span>${a.name}</span><strong>${a.count} проектов</strong></div>`).join('') || '<p class="text-muted">Нет данных</p>'}</div>
+          <div class="admin-stats-block"><h4>Топ модов</h4>${[...mods].sort((a,b) => b.downloads - a.downloads).slice(0,5).map(m => `<div class="admin-stats-row"><span>${m.name}</span><strong>${formatNumber(m.downloads)}</strong></div>`).join('')}</div>
+          <div class="admin-stats-block"><h4>По типам</h4>${Object.entries(countByField(mods, 'type')).map(([k,v]) => `<div class="admin-stats-row"><span>${METADATA.types[k] || k}</span><strong>${v}</strong></div>`).join('')}</div>
+        </div>
+      </div>
+
+      <div class="admin-tab-content ${activeTab === 'settings' ? 'active' : ''}" style="display: ${activeTab === 'settings' ? 'block' : 'none'};">
+        <div class="admin-settings-form">
+          <div class="form-group"><label class="form-label">Объявление на сайте</label>
+            <textarea id="admin-announcement" class="form-textarea" placeholder="Текст баннера для всех пользователей...">${siteSettings.announcement || ''}</textarea>
+          </div>
+          <div class="form-group"><label class="form-label"><input type="checkbox" id="admin-maintenance" ${siteSettings.maintenance ? 'checked' : ''}> Режим обслуживания</label></div>
+          <button class="btn btn-primary" onclick="saveAdminSiteSettings()"><i class="fa-solid fa-save"></i> Сохранить настройки</button>
+        </div>
+      </div>
+
+      <div class="admin-tab-content ${activeTab === 'logs' ? 'active' : ''}" style="display: ${activeTab === 'logs' ? 'block' : 'none'};">
+        <div class="admin-log-list">
+          ${activityLog.slice(0, 50).map(entry => `
+            <div class="admin-log-item">
+              <span class="admin-log-time">${formatRelativeTime(entry.time)}</span>
+              <strong>${entry.user}</strong> — ${entry.action}${entry.details ? `: ${entry.details}` : ''}
+            </div>
+          `).join('') || '<p style="color:var(--text-muted);">Журнал пуст.</p>'}
+        </div>
+      </div>
+
+      <!-- Reports Tab -->
+      <div class="admin-tab-content ${activeTab === 'reports' ? 'active' : ''}" style="display: ${activeTab === 'reports' ? 'block' : 'none'};">
+        ${renderAdminReportsTab(users)}
+      </div>
+
+      <!-- Notifications Tab -->
+      <div class="admin-tab-content ${activeTab === 'notifications' ? 'active' : ''}" style="display: ${activeTab === 'notifications' ? 'block' : 'none'};">
+        ${renderAdminNotificationsTab()}
+      </div>
+
+      <!-- Security Tab -->
+      <div class="admin-tab-content ${activeTab === 'security' ? 'active' : ''}" style="display: ${activeTab === 'security' ? 'block' : 'none'};">
+        ${renderAdminSecurityTab()}
+      </div>
+
+      <!-- Tools Tab -->
+      <div class="admin-tab-content ${activeTab === 'tools' ? 'active' : ''}" style="display: ${activeTab === 'tools' ? 'block' : 'none'};">
+        ${renderAdminToolsTab(users)}
+      </div>
+
+      <!-- System Info Tab -->
+      <div class="admin-tab-content ${activeTab === 'system' ? 'active' : ''}" style="display: ${activeTab === 'system' ? 'block' : 'none'};">
+        ${renderAdminSystemTab(users, mods)}
       </div>
     </div>
   `;
 
-  // --- TAB SWITCHING EVENTS ---
-  const modsBtn = document.getElementById("admin-tab-mods-btn");
-  const usersBtn = document.getElementById("admin-tab-users-btn");
-  const modsPanel = document.getElementById("admin-content-mods");
-  const usersPanel = document.getElementById("admin-content-users");
-
-  modsBtn.addEventListener("click", () => {
-    modsBtn.classList.add("active");
-    usersBtn.classList.remove("active");
-    modsPanel.style.display = "block";
-    usersPanel.style.display = "none";
-  });
-
-  usersBtn.addEventListener("click", () => {
-    usersBtn.classList.add("active");
-    modsBtn.classList.remove("active");
-    usersPanel.style.display = "block";
-    modsPanel.style.display = "none";
-  });
-
-  // --- ACTIONS: MODERATION EVENTS ---
-  
-  // Download button
-  document.querySelectorAll(".btn-download-pending").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const modId = btn.getAttribute("data-id");
-      const currentMods = getMods();
-      const modObj = currentMods.find(m => m.id === modId);
-      if (modObj && modObj.versions && modObj.versions.length > 0) {
-        triggerVersionDownload(modObj, modObj.versions[0]);
-      }
+  const userSearchInput = document.getElementById("admin-user-search");
+  if (userSearchInput) {
+    userSearchInput.addEventListener("input", () => {
+      clearTimeout(window.adminSearchDebounce);
+      window.adminSearchDebounce = setTimeout(() => {
+        renderAdminPanel("users", userSearchInput.value, "", document.getElementById("admin-user-role-filter")?.value || "");
+      }, 350);
     });
-  });
+  }
 
-  // Approve button
-  document.querySelectorAll(".btn-approve-pending").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const modId = btn.getAttribute("data-id");
-      approvePendingMod(modId);
+  const modSearchInput = document.getElementById("admin-mod-search");
+  if (modSearchInput) {
+    modSearchInput.addEventListener("input", () => {
+      clearTimeout(window.adminModSearchDebounce);
+      window.adminModSearchDebounce = setTimeout(() => {
+        renderAdminPanel("allmods", "", modSearchInput.value);
+      }, 350);
     });
-  });
-
-  // Reject button
-  document.querySelectorAll(".btn-reject-pending").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const modId = btn.getAttribute("data-id");
-      rejectPendingMod(modId);
-    });
-  });
-
-  // --- ACTIONS: ROLE MANAGEMENT ---
-  document.querySelectorAll(".admin-role-select").forEach(select => {
-    select.addEventListener("change", (e) => {
-      const uid = select.getAttribute("data-uid");
-      const newRole = e.target.value;
-      changeUserRole(uid, newRole);
-    });
-  });
-
-  // --- ACTIONS: USERNAME MANAGEMENT ---
-  document.querySelectorAll(".btn-edit-username").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const uid = btn.getAttribute("data-uid");
-      const registeredUsers = JSON.parse(localStorage.getItem("registered_users") || "[]");
-      const user = registeredUsers.find(u => u.uid === uid);
-      if (!user) return;
-      
-      const newNickname = prompt(`Редактирование никнейма для ${user.username}. Введите новый ник:`, user.username);
-      if (newNickname === null) return; // Cancelled
-      
-      const trimmed = newNickname.trim();
-      if (!trimmed) {
-        showToast("Никнейм не может быть пустым!", "error");
-        return;
-      }
-      
-      // Check if username is already taken
-      const nameExists = registeredUsers.some(u => u.username.toLowerCase() === trimmed.toLowerCase() && u.uid !== uid);
-      if (nameExists) {
-        showToast("Этот никнейм уже занят!", "error");
-        return;
-      }
-      
-      // Update nickname
-      const oldUsername = user.username;
-      user.username = trimmed;
-      localStorage.setItem("registered_users", JSON.stringify(registeredUsers));
-      
-      // Update any mods where this user is the author
-      const mods = getMods();
-      let updatedCount = 0;
-      mods.forEach(mod => {
-        if (mod.author === oldUsername) {
-          mod.author = trimmed;
-          updatedCount++;
-        }
-      });
-      if (updatedCount > 0) {
-        localStorage.setItem("mods_data", JSON.stringify(mods));
-      }
-      
-      showToast(`Никнейм изменен с "${oldUsername}" на "${trimmed}"!`, "success");
-      
-      // Re-render staying on the users tab
-      renderAdminPanel("users");
-    });
-  });
+  }
 }
 
-function approvePendingMod(modId) {
+function getTopAuthors(mods) {
+  const counts = {};
+  mods.forEach(m => { counts[m.author] = (counts[m.author] || 0) + 1; });
+  return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([name, count]) => ({ name, count }));
+}
+
+function countByField(items, field) {
+  const counts = {};
+  items.forEach(i => { const k = i[field] || "unknown"; counts[k] = (counts[k] || 0) + 1; });
+  return counts;
+}
+
+window.exportAdminData = function() {
+  const data = {
+    mods: getMods(),
+    users: JSON.parse(localStorage.getItem("registered_users") || "[]"),
+    siteSettings: getSiteSettings(),
+    activityLog: JSON.parse(localStorage.getItem("activity_log") || "[]"),
+    exportedAt: new Date().toISOString()
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `modsphere-backup-${Date.now()}.json`;
+  a.click();
+  logActivity("admin_export", "database backup");
+};
+
+window.importAdminData = function(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (data.mods) localStorage.setItem("mods_data", JSON.stringify(data.mods));
+      if (data.users) localStorage.setItem("registered_users", JSON.stringify(data.users));
+      if (data.siteSettings) saveSiteSettings(data.siteSettings);
+      if (data.activityLog) localStorage.setItem("activity_log", JSON.stringify(data.activityLog));
+      logActivity("admin_import", file.name);
+      showToast("Данные успешно импортированы", "success");
+      renderAdminPanel("settings");
+    } catch (_) {
+      showToast("Ошибка чтения JSON файла", "error");
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = "";
+};
+
+window.bulkApproveMods = function() {
+  const mods = getMods();
+  let count = 0;
+  mods.forEach(m => { if (!m.approved) { m.approved = true; m.updatedAt = new Date().toISOString(); count++; } });
+  localStorage.setItem("mods_data", JSON.stringify(mods));
+  logActivity("bulk_approve", `${count} mods`);
+  showToast(`Одобрено проектов: ${count}`, "success");
+  renderAdminPanel("mods");
+};
+
+window.toggleFeaturedMod = function(modId) {
+  const settings = getSiteSettings();
+  const ids = settings.featuredModIds || [];
+  const idx = ids.indexOf(modId);
+  if (idx === -1) ids.push(modId); else ids.splice(idx, 1);
+  saveSiteSettings({ featuredModIds: ids });
+  logActivity("featured_toggle", modId);
+  renderAdminPanel("allmods", "", document.getElementById("admin-mod-search")?.value || "");
+};
+
+window.resetUserPassword = function(uid) {
+  const newPass = prompt("Введите новый пароль для пользователя (мин. 6 символов):");
+  if (!newPass || newPass.length < 6) return;
+  const users = JSON.parse(localStorage.getItem("registered_users") || "[]");
+  const u = users.find(x => x.uid === uid);
+  if (u) {
+    u.password = newPass;
+    touchUserUpdated(u);
+    localStorage.setItem("registered_users", JSON.stringify(users));
+    logActivity("password_reset", u.username);
+    showToast(`Пароль для ${u.username} обновлён`, "success");
+  }
+};
+
+window.saveAdminSiteSettings = function() {
+  saveSiteSettings({
+    announcement: document.getElementById("admin-announcement")?.value.trim() || "",
+    maintenance: document.getElementById("admin-maintenance")?.checked || false
+  });
+  logActivity("site_settings_update");
+  showToast("Настройки сайта сохранены", "success");
+};
+
+window.deleteModAdmin = function(modId) {
+    if(confirm("Вы уверены, что хотите удалить этот мод?")) {
+        let mods = getMods();
+        mods = mods.filter(m => m.id !== modId);
+        localStorage.setItem("mods_data", JSON.stringify(mods));
+        showToast("Мод удален", "success");
+        renderAdminPanel('allmods');
+    }
+};
+
+window.toggleUserBan = function(uid) {
+    let users = JSON.parse(localStorage.getItem("registered_users") || "[]");
+    let u = users.find(x => x.uid === uid);
+    if(u) {
+        u.banned = !u.banned;
+        localStorage.setItem("registered_users", JSON.stringify(users));
+        showToast(u.banned ? "Пользователь заблокирован" : "Пользователь разблокирован", "success");
+        renderAdminPanel('users', document.getElementById('admin-user-search')?.value || '');
+    }
+};
+
+window.deleteUserAdmin = function(uid) {
+    if(confirm("Вы уверены, что хотите полностью удалить пользователя?")) {
+        let users = JSON.parse(localStorage.getItem("registered_users") || "[]");
+        users = users.filter(x => x.uid !== uid);
+        localStorage.setItem("registered_users", JSON.stringify(users));
+        showToast("Пользователь удален", "success");
+        renderAdminPanel('users', document.getElementById('admin-user-search')?.value || '');
+    }
+};
+
+
+window.approvePendingMod = function(modId) {
   const currentMods = getMods();
   const mod = currentMods.find(m => m.id === modId);
   if (mod) {
     mod.approved = true;
     mod.updatedAt = new Date().toISOString();
     localStorage.setItem("mods_data", JSON.stringify(currentMods));
+    logActivity("mod_approve", mod.name);
     showToast(`Проект "${mod.name}" успешно одобрен и опубликован!`, "success");
     renderAdminPanel();
   }
 }
 
-function rejectPendingMod(modId) {
+window.rejectPendingMod = function(modId) {
   let currentMods = getMods();
   const mod = currentMods.find(m => m.id === modId);
   if (mod) {
@@ -2852,7 +3873,7 @@ function rejectPendingMod(modId) {
   }
 }
 
-function changeUserRole(uid, newRole) {
+window.changeUserRole = function(uid, newRole) {
   const registeredUsers = JSON.parse(localStorage.getItem("registered_users") || "[]");
   const user = registeredUsers.find(u => u.uid === uid);
   if (user) {
@@ -2872,6 +3893,327 @@ function changeUserRole(uid, newRole) {
     renderAdminPanel("users");
   }
 }
+
+// --- NEW ADMIN TAB RENDERERS ---
+
+function renderAdminReportsTab(users) {
+  const reports = JSON.parse(localStorage.getItem("mod_reports") || "[]");
+  if (reports.length === 0) {
+    return `
+      <div class="no-results" style="padding: 48px 20px;">
+        <i class="fa-solid fa-flag" style="font-size: 48px; color: var(--primary-color);"></i>
+        <h3>Жалоб нет</h3>
+        <p>Пользователи пока не отправляли жалобы.</p>
+      </div>
+    `;
+  }
+  return `
+    <div style="margin-bottom:12px;">
+      <button class="btn btn-danger btn-sm" onclick="clearAllReports()"><i class="fa-solid fa-trash"></i> Очистить все жалобы</button>
+    </div>
+    <div class="admin-log-list">
+      ${reports.map((r, i) => `
+        <div class="admin-log-item">
+          <span class="admin-log-time">${formatRelativeTime(r.time)}</span>
+          <strong>${r.user}</strong> — ${r.action}${r.details ? `: ${r.details}` : ''}
+          <button class="btn btn-danger btn-sm" style="margin-left:8px;" onclick="dismissReport(${i})"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderAdminNotificationsTab() {
+  const notifications = JSON.parse(localStorage.getItem("admin_notifications") || "[]");
+  return `
+    <div class="admin-settings-form">
+      <h4 style="margin-bottom:16px;">Отправить уведомление всем пользователям</h4>
+      <div class="form-group">
+        <label class="form-label">Заголовок</label>
+        <input type="text" id="admin-notif-title" class="form-input" placeholder="Важное объявление">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Сообщение</label>
+        <textarea id="admin-notif-message" class="form-textarea" placeholder="Текст уведомления..."></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Тип</label>
+        <select id="admin-notif-type" class="form-input" style="width:200px;">
+          <option value="info">Информация</option>
+          <option value="warning">Предупреждение</option>
+          <option value="success">Успех</option>
+          <option value="error">Ошибка</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" onclick="sendAdminNotification()"><i class="fa-solid fa-paper-plane"></i> Отправить всем</button>
+    </div>
+    <div style="margin-top:24px;">
+      <h4 style="margin-bottom:12px;">История уведомлений</h4>
+      <div class="admin-log-list">
+        ${notifications.length === 0 ? '<p style="color:var(--text-muted);">Уведомления не отправлялись.</p>' :
+          notifications.map(n => `
+            <div class="admin-log-item">
+              <span class="admin-log-time">${formatRelativeTime(n.time)}</span>
+              <strong>${n.title}</strong> — ${n.message} <span class="result-tag" style="background:rgba(16,185,129,0.08);color:var(--primary-color);">${n.type}</span>
+            </div>
+          `).join('')
+        }
+      </div>
+    </div>
+  `;
+}
+
+function renderAdminSecurityTab() {
+  const loginLog = JSON.parse(localStorage.getItem("login_history") || "[]");
+  return `
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:16px; margin-bottom:24px;">
+      <div class="admin-stats-block" style="padding:20px;">
+        <h4><i class="fa-solid fa-shield"></i> Безопасность и защита</h4>
+        <p style="color:var(--text-secondary); font-size:13px; margin:12px 0;">Управление безопасностью платформы.</p>
+        <button class="btn btn-secondary btn-sm" onclick="forceLogoutAllUsers()"><i class="fa-solid fa-right-from-bracket"></i> Выход всех пользователей</button>
+      </div>
+      <div class="admin-stats-block" style="padding:20px;">
+        <h4><i class="fa-solid fa-lock"></i> Двухфакторная аутентификация</h4>
+        <p style="color:var(--text-secondary); font-size:13px; margin:12px 0;">2FA пока в разработке.</p>
+        <button class="btn btn-secondary btn-sm" disabled><i class="fa-solid fa-qrcode"></i> Настроить 2FA</button>
+      </div>
+    </div>
+    <div class="admin-settings-form">
+      <h4 style="margin-bottom:12px;">Журнал входов</h4>
+      <div class="admin-log-list">
+        ${loginLog.length === 0 ? '<p style="color:var(--text-muted);">История входов пуста.</p>' :
+          loginLog.slice(0, 30).map(entry => `
+            <div class="admin-log-item">
+              <span class="admin-log-time">${formatRelativeTime(entry.time)}</span>
+              <strong>${entry.username}</strong> — ${entry.action} (${entry.ip || 'IP не сохранён'})
+            </div>
+          `).join('')
+        }
+      </div>
+    </div>
+  `;
+}
+
+function renderAdminToolsTab(users) {
+  const dbSize = new Blob([JSON.stringify({
+    mods: getMods(),
+    users: users,
+    activityLog: JSON.parse(localStorage.getItem("activity_log") || "[]")
+  })]).size;
+  const dbSizeFormatted = dbSize > 1024 * 1024
+    ? (dbSize / (1024 * 1024)).toFixed(2) + ' MB'
+    : dbSize > 1024
+      ? (dbSize / 1024).toFixed(1) + ' KB'
+      : dbSize + ' B';
+  return `
+    <div class="admin-stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));">
+      <div class="admin-stats-block" style="padding:20px;">
+        <h4><i class="fa-solid fa-database"></i> База данных</h4>
+        <p style="font-size:24px; font-weight:700; color:var(--primary-color); margin:12px 0;">${dbSizeFormatted}</p>
+        <p style="font-size:13px; color:var(--text-secondary);">Текущий размер хранилища</p>
+        <div style="display:flex; gap:8px; margin-top:16px; flex-wrap:wrap;">
+          <button class="btn btn-secondary btn-sm" onclick="clearLocalCache()"><i class="fa-solid fa-broom"></i> Очистить кеш</button>
+          <button class="btn btn-secondary btn-sm" onclick="rebuildSearchIndex()"><i class="fa-solid fa-arrows-rotate"></i> Пересобрать индекс</button>
+        </div>
+      </div>
+      <div class="admin-stats-block" style="padding:20px;">
+        <h4><i class="fa-solid fa-file-export"></i> Экспорт данных</h4>
+        <p style="font-size:13px; color:var(--text-secondary); margin:12px 0;">Выгрузить данные в различных форматах.</p>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn btn-secondary btn-sm" onclick="exportUsersCSV()"><i class="fa-solid fa-table"></i> Экспорт юзеров CSV</button>
+          <button class="btn btn-secondary btn-sm" onclick="exportModsCSV()"><i class="fa-solid fa-table"></i> Экспорт модов CSV</button>
+        </div>
+      </div>
+      <div class="admin-stats-block" style="padding:20px;">
+        <h4><i class="fa-solid fa-bolt"></i> Быстрые действия</h4>
+        <p style="font-size:13px; color:var(--text-secondary); margin:12px 0;">Часто используемые операции.</p>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn btn-secondary btn-sm" onclick="bulkApproveMods()"><i class="fa-solid fa-check-double"></i> Одобрить все</button>
+          <button class="btn btn-secondary btn-sm" onclick="syncPull(false).then(() => showToast('Синхронизировано', 'success'))"><i class="fa-solid fa-cloud"></i> Синхр.</button>
+          <button class="btn btn-secondary btn-sm" onclick="if(confirm('Удалить все неодобренные моды?')){ rejectAllPending() }"><i class="fa-solid fa-trash"></i> Очистить очередь</button>
+        </div>
+      </div>
+      <div class="admin-stats-block" style="padding:20px;">
+        <h4><i class="fa-solid fa-flag"></i> Забаненные пользователи</h4>
+        <p style="font-size:24px; font-weight:700; color:#ef4444; margin:12px 0;">${users.filter(u => u.banned).length}</p>
+        <p style="font-size:13px; color:var(--text-secondary);">Пользователей в бане</p>
+        <button class="btn btn-secondary btn-sm" onclick="renderAdminPanel('users')"><i class="fa-solid fa-eye"></i> Просмотреть</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderAdminSystemTab(users, mods) {
+  const totalStorage = estimateStorageUsage();
+  const userAgents = JSON.parse(localStorage.getItem("user_agents") || "[]");
+  return `
+    <div class="admin-stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));">
+      <div class="admin-stats-block" style="padding:20px;">
+        <h4><i class="fa-solid fa-microchip"></i> Информация о системе</h4>
+        <div class="admin-stats-row"><span>Версия платформы</span><strong>ModSphere v2.0</strong></div>
+        <div class="admin-stats-row"><span>Тип хранилища</span><strong>localStorage + Серверная синхронизация</strong></div>
+        <div class="admin-stats-row"><span>Браузер</span><strong>${navigator.userAgent.substring(0, 80)}</strong></div>
+        <div class="admin-stats-row"><span>Язык браузера</span><strong>${navigator.language}</strong></div>
+        <div class="admin-stats-row"><span>Онлайн-режим</span><strong>${navigator.onLine ? 'Да' : 'Нет'}</strong></div>
+      </div>
+      <div class="admin-stats-block" style="padding:20px;">
+        <h4><i class="fa-solid fa-database"></i> Использование хранилища</h4>
+        <div class="admin-stats-row"><span>Модов в БД</span><strong>${mods.length}</strong></div>
+        <div class="admin-stats-row"><span>Пользователей</span><strong>${users.length}</strong></div>
+        <div class="admin-stats-row"><span>Всего записей в журнале</span><strong>${JSON.parse(localStorage.getItem("activity_log") || "[]").length}</strong></div>
+        <div class="admin-stats-row"><span>Загруженность localStorage</span><strong>${totalStorage}</strong></div>
+      </div>
+      <div class="admin-stats-block" style="padding:20px;">
+        <h4><i class="fa-solid fa-chart-simple"></i> Ролевая статистика</h4>
+        ${['PLAYER', 'MODERATOR', 'ADMIN', 'OWNER'].map(role => {
+          const count = users.filter(u => (u.role || 'PLAYER').toUpperCase() === role).length;
+          return `<div class="admin-stats-row"><span>${role}</span><strong>${count}</strong></div>`;
+        }).join('')}
+      </div>
+      <div class="admin-stats-block" style="padding:20px;">
+        <h4><i class="fa-solid fa-bug"></i> Диагностика</h4>
+        <button class="btn btn-secondary btn-sm" style="margin-bottom:8px;" onclick="runSystemDiagnostic()"><i class="fa-solid fa-stethoscope"></i> Запустить диагностику</button>
+        <div id="admin-diag-result" style="font-size:13px; color:var(--text-secondary); margin-top:8px;"></div>
+      </div>
+    </div>
+  `;
+}
+
+// --- ADMIN TOOLS HANDLERS ---
+
+window.forceLogoutAllUsers = function() {
+  localStorage.removeItem("current_user");
+  showToast("Все пользователи принудительно вышли из системы", "info");
+  renderAdminPanel();
+  renderUserAuth();
+};
+
+window.sendAdminNotification = function() {
+  const title = document.getElementById("admin-notif-title")?.value.trim();
+  const message = document.getElementById("admin-notif-message")?.value.trim();
+  const type = document.getElementById("admin-notif-type")?.value || "info";
+  if (!title || !message) {
+    showToast("Заполните заголовок и сообщение!", "info");
+    return;
+  }
+  const notifications = JSON.parse(localStorage.getItem("admin_notifications") || "[]");
+  notifications.unshift({ title, message, type, time: new Date().toISOString() });
+  localStorage.setItem("admin_notifications", JSON.stringify(notifications));
+  showToast(`Уведомление "${title}" отправлено всем пользователям!`, "success");
+  logActivity("notification_send", title);
+  renderAdminPanel("notifications");
+};
+
+window.dismissReport = function(index) {
+  const reports = JSON.parse(localStorage.getItem("mod_reports") || "[]");
+  reports.splice(index, 1);
+  localStorage.setItem("mod_reports", JSON.stringify(reports));
+  renderAdminPanel("reports");
+};
+
+window.clearAllReports = function() {
+  if (!confirm("Очистить все жалобы?")) return;
+  localStorage.setItem("mod_reports", "[]");
+  showToast("Все жалобы удалены", "success");
+  renderAdminPanel("reports");
+};
+
+window.clearLocalCache = function() {
+  localStorage.removeItem("mods_db_version");
+  localStorage.removeItem("recently_viewed");
+  localStorage.removeItem("mod_ratings");
+  showToast("Кеш очищен", "success");
+  logActivity("cache_clear");
+};
+
+window.rebuildSearchIndex = function() {
+  const mods = getMods();
+  const index = mods.map(m => ({
+    id: m.id,
+    name: m.name,
+    author: m.author,
+    desc: m.shortDescription
+  }));
+  localStorage.setItem("search_index", JSON.stringify(index));
+  showToast(`Индекс пересобран: ${index.length} записей`, "success");
+  logActivity("index_rebuild", `${index.length} entries`);
+};
+
+window.rejectAllPending = function() {
+  let mods = getMods();
+  const pending = mods.filter(m => !m.approved);
+  mods = mods.filter(m => m.approved);
+  localStorage.setItem("mods_data", JSON.stringify(mods));
+  showToast(`Отклонено и удалено: ${pending.length} проектов`, "success");
+  logActivity("reject_all_pending", `${pending.length} mods`);
+  renderAdminPanel("mods");
+};
+
+window.exportUsersCSV = function() {
+  const users = JSON.parse(localStorage.getItem("registered_users") || "[]");
+  let csv = "UID,Username,Email,Role,Banned,Created\n";
+  users.forEach(u => {
+    csv += `${u.uid || ''},${u.username},${u.email},${u.role || 'PLAYER'},${u.banned ? 'Yes' : 'No'},${u.updatedAt || ''}\n`;
+  });
+  downloadBlob(csv, 'text/csv', `users-export-${Date.now()}.csv`);
+  logActivity("export_users_csv");
+};
+
+window.exportModsCSV = function() {
+  const mods = getMods();
+  let csv = "ID,Name,Author,Type,Downloads,Follows,Approved,Created\n";
+  mods.forEach(m => {
+    csv += `${m.id},${m.name},${m.author},${m.type},${m.downloads || 0},${m.follows || 0},${m.approved},${m.createdAt || ''}\n`;
+  });
+  downloadBlob(csv, 'text/csv', `mods-export-${Date.now()}.csv`);
+  logActivity("export_mods_csv");
+};
+
+function downloadBlob(content, mimeType, filename) {
+  const blob = new Blob([content], { type: mimeType });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function estimateStorageUsage() {
+  let total = 0;
+  for (let key in localStorage) {
+    if (localStorage.hasOwnProperty(key)) {
+      total += localStorage[key].length * 2;
+    }
+  }
+  return total > 1024 * 1024
+    ? (total / (1024 * 1024)).toFixed(2) + ' MB'
+    : total > 1024
+      ? (total / 1024).toFixed(1) + ' KB'
+      : total + ' B';
+}
+
+window.runSystemDiagnostic = function() {
+  const issues = [];
+  const users = JSON.parse(localStorage.getItem("registered_users") || "[]");
+  const mods = getMods();
+
+  if (users.length === 0) issues.push("❌ Нет зарегистрированных пользователей");
+  if (mods.length === 0) issues.push("❌ Нет модов в базе");
+  const orphanMods = mods.filter(m => !users.some(u => u.username === m.author));
+  if (orphanMods.length > 0) issues.push(`⚠ Найдено ${orphanMods.length} модов без авторов`);
+  const dupEmails = users.filter((u, i) => users.some((u2, j) => i !== j && u2.email === u.email));
+  if (dupEmails.length > 0) issues.push(`❌ Найдены дубликаты email: ${dupEmails.map(u => u.email).join(', ')}`);
+  if (!navigator.onLine) issues.push("⚠ Нет подключения к интернету");
+
+  const diagEl = document.getElementById("admin-diag-result");
+  if (diagEl) {
+    diagEl.innerHTML = issues.length > 0
+      ? issues.join('<br>')
+      : '✅ Все проверки пройдены успешно!';
+  }
+};
+
+
 
 // --- EMAIL REGISTRATION VERIFICATION SYSTEM ---
 function handleRegisterFormSubmit(e) {
@@ -2989,9 +4331,11 @@ function showVerificationStep(tempUser, verificationCode) {
     const enteredCode = document.getElementById("verification-code-input").value.trim();
     if (enteredCode === String(verificationCode)) {
       const users = JSON.parse(localStorage.getItem("registered_users") || "[]");
+      touchUserUpdated(tempUser);
       users.push(tempUser);
       localStorage.setItem("registered_users", JSON.stringify(users));
       localStorage.setItem("current_user", JSON.stringify(tempUser));
+      logActivity("user_register", tempUser.username);
       
       showToast(`Аккаунт успешно создан! Добро пожаловать, ${tempUser.username}!`, "success");
       closeAuthModal();
@@ -3022,4 +4366,102 @@ function restoreRegistrationFormHTML() {
     <button type="submit" class="btn btn-primary full-width" style="margin-top: 16px; justify-content: center;">Зарегистрироваться</button>
   `;
   registerForm.onsubmit = null;
+}
+
+// --- SITE FEATURES & UTILITIES ---
+function setupSiteFeatures() {
+  if (!document.getElementById("scroll-top-btn")) {
+    const btn = document.createElement("button");
+    btn.id = "scroll-top-btn";
+    btn.className = "scroll-top-btn";
+    btn.title = "Наверх";
+    btn.innerHTML = '<i class="fa-solid fa-arrow-up"></i>';
+    btn.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
+    document.body.appendChild(btn);
+  }
+
+  window.addEventListener("scroll", () => {
+    const btn = document.getElementById("scroll-top-btn");
+    if (btn) btn.classList.toggle("visible", window.scrollY > 400);
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "/" && !e.target.matches("input, textarea, select")) {
+      e.preventDefault();
+      const search = document.getElementById("header-search-input") || document.getElementById("hero-search-input");
+      if (search) search.focus();
+    }
+    if (e.key === "Escape") {
+      closeAuthModal();
+      closeProfileModal();
+      closePublicProfileModal();
+      document.getElementById("settings-modal").style.display = "none";
+      deactivateSpotlightSearch();
+    }
+  });
+
+  updateSyncStatusIndicator();
+}
+
+function renderSiteAnnouncement() {
+  const settings = JSON.parse(localStorage.getItem("site_settings") || "{}");
+  let bar = document.getElementById("site-announcement-bar");
+  if (!settings.announcement) {
+    if (bar) bar.remove();
+    return;
+  }
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "site-announcement-bar";
+    bar.className = "site-announcement-bar";
+    document.body.prepend(bar);
+  }
+  bar.innerHTML = `<i class="fa-solid fa-bullhorn"></i> <span>${settings.announcement}</span>`;
+}
+
+function copyTextToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text);
+  } else {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+  }
+}
+
+function addRecentlyViewed(modId) {
+  let list = JSON.parse(localStorage.getItem("recently_viewed") || "[]");
+  list = list.filter(id => id !== modId);
+  list.unshift(modId);
+  if (list.length > 12) list.length = 12;
+  localStorage.setItem("recently_viewed", JSON.stringify(list));
+}
+
+function getModRating(modId) {
+  const ratings = JSON.parse(localStorage.getItem("mod_ratings") || "{}");
+  return ratings[modId] || 0;
+}
+
+function setModRating(modId, value) {
+  const ratings = JSON.parse(localStorage.getItem("mod_ratings") || "{}");
+  ratings[modId] = value;
+  localStorage.setItem("mod_ratings", JSON.stringify(ratings));
+}
+
+function renderStarRating(value) {
+  return [1, 2, 3, 4, 5].map(i =>
+    `<span class="star-rating-item ${i <= value ? 'active' : ''}" data-star="${i}"><i class="fa-${i <= value ? 'solid' : 'regular'} fa-star"></i></span>`
+  ).join("");
+}
+
+function getSiteSettings() {
+  return JSON.parse(localStorage.getItem("site_settings") || "{}");
+}
+
+function saveSiteSettings(settings) {
+  localStorage.setItem("site_settings", JSON.stringify({ ...getSiteSettings(), ...settings }));
+  renderSiteAnnouncement();
 }

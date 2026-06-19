@@ -39,9 +39,13 @@
         <button class="theme-toggle mobile-search-toggle" id="mobile-search-toggle-btn" title="Поиск" style="display: none;">
           <i class="fa-solid fa-magnifying-glass"></i>
         </button>
+        <button class="theme-toggle settings-header-btn" id="settings-header-btn" title="Настройки">
+          <i class="fa-solid fa-sliders"></i>
+        </button>
         <button class="theme-toggle" id="theme-toggle" title="Переключить тему">
           <i class="fa-solid fa-moon"></i>
         </button>
+        <span class="sync-status-indicator" id="sync-status-indicator" title="Синхронизация"><i class="fa-solid fa-cloud"></i></span>
         <div class="user-auth-wrapper" id="user-auth-wrapper">
           <!-- Populated dynamically by app.js: Login button or User Profile dropdown -->
         </div>
@@ -198,6 +202,107 @@
             <button class="btn btn-primary" id="btn-profile-save" style="padding: 10px 20px; background-color: var(--primary-color); justify-content:center;"><i class="fa-solid fa-floppy-disk"></i> Сохранить</button>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div class="profile-modal" id="settings-modal" style="display: none; position: fixed; inset: 0; z-index: 1500;">
+    <div class="profile-modal-backdrop" id="settings-modal-backdrop" style="position: absolute; inset: 0; background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(8px);"></div>
+    <div class="profile-modal-card" style="position: relative; margin: 10vh auto; max-width: 500px; background: var(--surface-color); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 32px; box-shadow: var(--shadow-lg);">
+      <button class="profile-modal-close" id="settings-modal-close-btn" title="Закрыть"><i class="fa-solid fa-xmark"></i></button>
+      <h2 class="profile-modal-title"><i class="fa-solid fa-gear" style="color:var(--primary-color); margin-right:8px;"></i>Настройки сайта</h2>
+      <p class="profile-modal-subtitle">Выберите язык и тему оформления. Изменения сохраняются в вашем профиле.</p>
+      
+      <div class="form-group" style="margin-top:20px;">
+        <label class="form-label" style="font-size:14px; font-weight:600;"><i class="fa-solid fa-globe" style="color:var(--primary-color);"></i> Язык интерфейса</label>
+        <select class="form-input" id="settings-language" style="padding: 10px; font-size:14px; margin-top:8px;">
+          <option value="ru">Русский</option>
+          <option value="en">English (In Progress)</option>
+        </select>
+      </div>
+
+      <div class="form-group" style="margin-top:20px;">
+        <label class="form-label" style="font-size:14px; font-weight:600;"><i class="fa-solid fa-palette" style="color:var(--primary-color);"></i> Тема (Стиль сайта)</label>
+        <select class="form-input" id="settings-theme" style="padding: 10px; font-size:14px; margin-top:8px;">
+          <option value="dark">Стандартная (Тёмная)</option>
+          <option value="light">Светлая</option>
+          <option value="minimalism">Минимализм (Тёмно-серый, синий, сетка)</option>
+          <option value="liquid">Ликуид (Стекло, размытие, градиенты)</option>
+        </select>
+        <p class="form-label" style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">Выбранная тема будет применяться только для вашего профиля.</p>
+      </div>
+
+      <div class="form-group" style="margin-top:16px;">
+        <label class="form-label" style="font-size:14px; font-weight:600;"><i class="fa-solid fa-compress" style="color:var(--primary-color);"></i> Компактный режим</label>
+        <label class="form-checkbox-label" style="margin-top:8px;"><input type="checkbox" id="settings-compact"> Уменьшить отступы интерфейса</label>
+      </div>
+
+      <div class="form-group" style="margin-top:12px;">
+        <label class="form-label" style="font-size:14px; font-weight:600;"><i class="fa-solid fa-wand-magic-sparkles" style="color:var(--primary-color);"></i> Анимации</label>
+        <label class="form-checkbox-label" style="margin-top:8px;"><input type="checkbox" id="settings-animations" checked> Включить анимации интерфейса</label>
+      </div>
+
+      <div class="form-group" style="margin-top:12px;">
+        <label class="form-label" style="font-size:14px; font-weight:600;"><i class="fa-solid fa-bell" style="color:var(--primary-color);"></i> Уведомления</label>
+        <label class="form-checkbox-label" style="margin-top:8px;"><input type="checkbox" id="settings-notifications"> Email-уведомления о модерации</label>
+      </div>
+
+      <div class="form-group" style="margin-top:12px;">
+        <label class="form-label" style="font-size:14px; font-weight:600;"><i class="fa-solid fa-arrow-down-wide-short" style="color:var(--primary-color);"></i> Сортировка по умолчанию</label>
+        <select class="form-input" id="settings-default-sort" style="padding: 10px; font-size:14px; margin-top:8px;">
+          <option value="downloads">Скачивания</option>
+          <option value="follows">Подписчики</option>
+          <option value="updated">Обновлено</option>
+          <option value="relevance">Название</option>
+        </select>
+      </div>
+
+      <div class="form-group" style="margin-top:12px;">
+        <label class="form-label" style="font-size:14px; font-weight:600;"><i class="fa-solid fa-clock" style="color:var(--primary-color);"></i> Формат дат</label>
+        <select class="form-input" id="settings-date-format" style="padding: 10px; font-size:14px; margin-top:8px;">
+          <option value="relative">Относительный (2 дн. назад)</option>
+          <option value="absolute">Абсолютный (15 янв. 2026)</option>
+        </select>
+      </div>
+
+      <div style="margin-top:24px; padding-top:20px; border-top:1px solid var(--border-color);">
+        <h4 style="font-size:14px; font-weight:700; color:var(--text-primary); margin-bottom:16px;"><i class="fa-solid fa-shield" style="color:var(--primary-color);"></i> Приватность</h4>
+        <div class="form-group" style="margin-top:8px;">
+          <label class="form-checkbox-label"><input type="checkbox" id="settings-show-profile" checked> Показывать профиль публично</label>
+        </div>
+        <div class="form-group" style="margin-top:4px;">
+          <label class="form-checkbox-label"><input type="checkbox" id="settings-show-email"> Показывать email в профиле</label>
+        </div>
+        <div class="form-group" style="margin-top:4px;">
+          <label class="form-checkbox-label"><input type="checkbox" id="settings-show-activity" checked> Показывать активность</label>
+        </div>
+      </div>
+
+      <div style="margin-top:20px; padding-top:20px; border-top:1px solid var(--border-color);">
+        <h4 style="font-size:14px; font-weight:700; color:var(--text-primary); margin-bottom:16px;"><i class="fa-solid fa-universal-access" style="color:var(--primary-color);"></i> Доступность</h4>
+        <div class="form-group" style="margin-top:8px;">
+          <label class="form-label" style="font-size:13px;">Размер шрифта</label>
+          <select class="form-input" id="settings-font-size" style="padding: 8px; font-size:13px; margin-top:4px;">
+            <option value="normal">Обычный</option>
+            <option value="large">Крупный</option>
+            <option value="xl">Очень крупный</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-top:8px;">
+          <label class="form-checkbox-label"><input type="checkbox" id="settings-high-contrast"> Повышенный контраст</label>
+        </div>
+      </div>
+
+      <div style="margin-top:20px; padding-top:20px; border-top:1px solid var(--border-color);">
+        <h4 style="font-size:14px; font-weight:700; color:#ef4444; margin-bottom:12px;"><i class="fa-solid fa-triangle-exclamation" style="color:#ef4444;"></i> Опасная зона</h4>
+        <p style="font-size:12px; color:var(--text-secondary); margin-bottom:12px;">Очистить историю просмотренных модов и избранное.</p>
+        <button class="btn btn-danger btn-sm" id="btn-clear-browsing-data"><i class="fa-solid fa-eraser"></i> Очистить просмотры</button>
+      </div>
+
+      <div style="margin-top:30px; display:flex; gap:12px; justify-content:flex-end;">
+        <button class="btn btn-secondary" id="btn-settings-close" style="padding: 10px 20px;">Отмена</button>
+        <button class="btn btn-primary" id="btn-settings-save" style="padding: 10px 20px; background-color: var(--primary-color); justify-content:center;"><i class="fa-solid fa-check"></i> Применить</button>
       </div>
     </div>
   </div>
