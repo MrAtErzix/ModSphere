@@ -282,7 +282,12 @@ async function syncPull(silent = true) {
 
 function startSyncPolling() {
   if (syncPollInterval) return;
-  syncPollInterval = setInterval(() => syncPull(true), 12000);
+  syncPollInterval = setInterval(async () => {
+    const changed = await syncPull(true);
+    if (changed && window.location.hash === '#/admin') {
+      handleRoute();
+    }
+  }, 12000);
 }
 
 function logActivity(action, details = "") {

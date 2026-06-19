@@ -5,7 +5,7 @@ import sys
 import json
 from datetime import datetime
 
-PORT = 8000
+PORT = 8080
 DB_FILE = 'db.json'
 
 
