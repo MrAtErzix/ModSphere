@@ -3,6 +3,11 @@ import socketserver
 import os
 import sys
 import json
+import socket
+import subprocess
+import threading
+import signal
+import time
 from datetime import datetime
 
 PORT = int(os.environ.get("PORT", "8080"))
@@ -157,28 +162,159 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
         super().do_POST()
 
 
+def get_lan_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.1)
+        s.connect(("10.255.255.255", 1))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except:
+        try:
+            return [ip for ip in socket.gethostbyname_ex(socket.gethostname())[2] if not ip.startswith("127.")][0]
+        except:
+            return "127.0.0.1"
+
+
+tunnel_proc = None
+public_url = None
+
+
+def start_tunnel_background(port):
+    global tunnel_proc, public_url
+
+    def read_ssh_output(proc, keyword_filter, url_extractor):
+        global public_url
+        for line in iter(proc.stdout.readline, ""):
+            line = line.rstrip()
+            if line:
+                print(f"     {line}")
+            if keyword_filter(line):
+                url = url_extractor(line)
+                if url:
+                    public_url = url
+                    print()
+                    print("=" * 60)
+                    print(" 🎉  САЙТ ДОСТУПЕН ИЗ ЛЮБОЙ ТОЧКИ МИРА!")
+                    print("=" * 60)
+                    print(f" 🔗 {public_url}")
+                    print("=" * 60)
+                    print(" Отправьте эту ссылку вашим друзьям!")
+                    print()
+                    return
+
+    def try_localtunnel():
+        global tunnel_proc
+        print(" [*] Пробуем localhost.run (SSH)...")
+        try:
+            proc = subprocess.Popen(
+                ["ssh", "-o", "StrictHostKeyChecking=no", "-o", "ServerAliveInterval=30",
+                 "-R", f"80:localhost:{port}", "nokey@localhost.run"],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+            )
+            tunnel_proc = proc
+            t = threading.Thread(target=read_ssh_output, args=(
+                proc,
+                lambda l: "https://" in l and ".lhr.life" in l,
+                lambda l: next((w.rstrip() for w in l.split() if "https://" in w and ".lhr.life" in w), None)
+            ), daemon=True)
+            t.start()
+            return True
+        except Exception as e:
+            print(f"     [!] {e}")
+            return False
+
+    def try_serveo():
+        global tunnel_proc
+        print(" [*] Пробуем serveo.net...")
+        try:
+            proc = subprocess.Popen(
+                ["ssh", "-o", "StrictHostKeyChecking=no", "-o", "ServerAliveInterval=30",
+                 "-R", f"80:localhost:{port}", "serveo.net"],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+            )
+            tunnel_proc = proc
+            t = threading.Thread(target=read_ssh_output, args=(
+                proc,
+                lambda l: "https://" in l,
+                lambda l: next((w.rstrip() for w in l.split() if "https://" in w), None)
+            ), daemon=True)
+            t.start()
+            return True
+        except Exception as e:
+            print(f"     [!] {e}")
+            return False
+
+    def try_pyngrok():
+        global public_url
+        print(" [*] Пробуем pyngrok...")
+        try:
+            from pyngrok import ngrok
+            public_url = ngrok.connect(port).public_url
+            print(f"     ➜ {public_url}")
+            return True
+        except ImportError:
+            print("     [!] pyngrok не установлен")
+            return False
+        except Exception as e:
+            print(f"     [!] {e}")
+            return False
+
+    for method in [try_localtunnel, try_serveo, try_pyngrok]:
+        if method():
+            return True
+
+    print(" [!] Не удалось создать туннель.")
+    print("     Установите pyngrok: pip install pyngrok && ngrok authtoken <token>")
+    return False
+
+
+# --- MAIN ---
 script_dir = os.path.dirname(os.path.abspath(__file__))
 os.chdir(script_dir)
 
 host = os.environ.get("HOST", "0.0.0.0")
 is_render = "RENDER" in os.environ or "PORT" in os.environ
+use_public = "--public" in sys.argv or os.environ.get("PUBLIC") == "1"
+lan_ip = get_lan_ip()
 
-print("=" * 60)
-if is_render:
-    print("            ModSphere Server (Render)")
-else:
-    print("            ModSphere Local Dev Server")
-print("=" * 60)
-print(f" Адрес сайта:   http://{host}:{PORT}")
+sys.argv = [a for a in sys.argv if a != "--public"]
+
+print("=" * 62)
+print("               ModSphere Server")
+print("=" * 62)
+print(f" Локально:      http://localhost:{PORT}")
+print(f"                http://127.0.0.1:{PORT}")
+if not is_render:
+    print(f" LAN:           http://{lan_ip}:{PORT}")
+print("=" * 62)
+
+if use_public and not is_render:
+    print(" 🌐 РЕЖИМ ПУБЛИЧНОГО ДОСТУПА (--public)")
+    print("    Туннель создаётся в фоне, сервер запущен сразу.")
+    print()
+    start_tunnel_background(PORT)
+    print()
+
 print(" Для выхода:    Нажмите Ctrl + C")
-print("=" * 60)
+print("=" * 62)
+
+def cleanup(*args):
+    print("\n[!] Остановка сервера...")
+    if tunnel_proc:
+        tunnel_proc.terminate()
+        tunnel_proc.wait()
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, cleanup)
+signal.signal(signal.SIGTERM, cleanup)
 
 try:
     with socketserver.TCPServer((host, PORT), MyHandler) as httpd:
         httpd.serve_forever()
 except KeyboardInterrupt:
-    print("\n[!] Сервер остановлен пользователем.")
-    sys.exit(0)
+    cleanup()
 except Exception as e:
     print(f"\n[!] Ошибка запуска сервера: {e}")
     sys.exit(1)

@@ -1828,9 +1828,19 @@ function triggerVersionDownload(mod, version, countSpanElement) {
 function renderCreateForm() {
   const container = document.getElementById("main-content");
   
-  // Custom states for form
+  let step = 1;
   let selectedEmoji = "📦";
   let selectedColor = "#10b981";
+  let uploadedAvatarData = null;
+  let modFileName = "";
+  let modFileSize = "";
+  let modFileData = "";
+  let tags = [];
+  let screenshots = [];
+  let donationPatreon = "";
+  let donationKofi = "";
+  let donationPaypal = "";
+  let discordUrl = "";
   
   const emojis = ["📦", "⚙️", "⚡", "👁️", "🏔️", "✨", "🐉", "📖", "🔨", "🧩", "🧪", "🚀"];
   const colors = ["#10b981", "#a855f7", "#f59e0b", "#ef4444", "#dc2626", "#3b82f6", "#06b6d4", "#ec4899", "#8b5cf6"];
@@ -1849,65 +1859,226 @@ function renderCreateForm() {
     { name: "AppleSkin", url: "https://cdn.modrinth.com/data/EsAf2P5H/icon.png" }
   ];
 
-  container.innerHTML = `
-    <div class="form-panel">
-      <h2 class="form-title">Создание нового проекта</h2>
-      <p class="form-subtitle">Загрузите свой мод, модпак или ресурспак и поделитесь им с миллионами игроков.</p>
-      
+  function getFormValues() {
+    return {
+      name: document.getElementById("form-name")?.value?.trim() || "",
+      slug: document.getElementById("form-slug")?.value?.trim()?.toLowerCase()?.replace(/[^a-z0-9_-]/g, "-") || "",
+      type: document.getElementById("form-type")?.value || "mod",
+      license: document.getElementById("form-license")?.value?.trim() || "MIT",
+      shortDesc: document.getElementById("form-short-desc")?.value?.trim() || "",
+      desc: document.getElementById("form-desc")?.value?.trim() || "",
+      source: document.getElementById("form-source")?.value?.trim() || "",
+      issues: document.getElementById("form-issues")?.value?.trim() || "",
+      loaders: Array.from(document.querySelectorAll('input[name="form-loader"]:checked')).map(c => c.value),
+      gameVersions: Array.from(document.querySelectorAll('input[name="form-version"]:checked')).map(c => c.value),
+      categories: Array.from(document.querySelectorAll('input[name="form-category"]:checked')).map(c => c.value),
+      javaVer: document.getElementById("form-java")?.value || "",
+      ramMin: document.getElementById("form-ram")?.value || "",
+      changelog: document.getElementById("form-changelog")?.value?.trim() || ""
+    };
+  }
+
+  function updatePreview() {
+    const vals = getFormValues();
+    const pName = document.getElementById("preview-name");
+    const pDesc = document.getElementById("preview-desc");
+    const pAuthor = document.getElementById("preview-author");
+    const pIcon = document.getElementById("preview-icon");
+    const pType = document.getElementById("preview-type");
+    const pLoaders = document.getElementById("preview-loaders");
+    const pVersions = document.getElementById("preview-versions");
+    const pTags = document.getElementById("preview-tags");
+    const currentUser = JSON.parse(localStorage.getItem("current_user") || "null");
+    
+    if (pName) pName.textContent = vals.name || "Название проекта";
+    if (pDesc) pDesc.textContent = vals.shortDesc || "Краткое описание проекта";
+    if (pAuthor) pAuthor.textContent = (currentUser ? currentUser.username : "Мой проект") + " • только что";
+    if (pIcon) {
+      if (uploadedAvatarData) {
+        pIcon.innerHTML = `<img src="${uploadedAvatarData}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit;">`;
+      } else {
+        pIcon.textContent = selectedEmoji;
+        pIcon.style.backgroundColor = selectedColor;
+      }
+    }
+    if (pType) pType.innerHTML = `<i class="fa-solid fa-tag"></i> ${METADATA.categories[vals.categories[0]] || vals.type || "Мод"}`;
+    if (pLoaders) {
+      const ls = vals.loaders.map(l => METADATA.loaders[l] || l).filter(Boolean);
+      pLoaders.innerHTML = `<i class="fa-solid fa-cube"></i> ${ls.join(", ") || "Fabric"}`;
+    }
+    if (pVersions) {
+      pVersions.innerHTML = `<i class="fa-solid fa-layer-group"></i> ${vals.gameVersions[0] || "1.20.1"}${vals.gameVersions.length > 1 ? " +" + (vals.gameVersions.length - 1) : ""}`;
+    }
+    if (pTags) {
+      const allTags = [...tags];
+      if (vals.categories.length) allTags.push(...vals.categories.slice(0, 2));
+      pTags.innerHTML = allTags.slice(0, 4).map(t => `<span class="preview-tag">${METADATA.categories[t] || t}</span>`).join("");
+      if (allTags.length > 4) pTags.innerHTML += `<span class="preview-tag">+${allTags.length - 4}</span>`;
+    }
+  }
+
+  function goToStep(n) {
+    step = n;
+    document.querySelectorAll(".wizard-step-content").forEach(el => el.classList.remove("active"));
+    document.querySelectorAll(".wizard-step").forEach(el => el.classList.remove("active"));
+    const content = document.querySelector(`.wizard-step-content[data-step="${step}"]`);
+    if (content) content.classList.add("active");
+    const stepEl = document.querySelector(`.wizard-step[data-step="${step}"]`);
+    if (stepEl) stepEl.classList.add("active");
+    updatePreview();
+    renderNav();
+    document.querySelector(".wizard-body")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function renderNav() {
+    const nav = document.getElementById("wizard-nav");
+    if (!nav) return;
+    let left = "";
+    let right = "";
+    if (step > 1) left = '<button type="button" class="btn btn-secondary" id="wizard-prev"><i class="fa-solid fa-arrow-left"></i> Назад</button>';
+    if (step < 4) right = '<button type="button" class="btn btn-primary" id="wizard-next">Далее <i class="fa-solid fa-arrow-right"></i></button>';
+    if (step === 4) right = '<button type="submit" class="btn btn-success" id="wizard-publish" style="background:var(--success-color,#10b981);border-color:var(--success-color,#10b981);"><i class="fa-solid fa-upload"></i> Опубликовать проект</button>';
+    nav.innerHTML = `<div>${left}</div><button type="button" class="btn btn-secondary" id="btn-cancel-create">Отменить</button><div>${right}</div>`;
+    
+    document.getElementById("btn-cancel-create")?.addEventListener("click", () => { window.location.hash = "#/"; });
+    document.getElementById("wizard-prev")?.addEventListener("click", () => goToStep(step - 1));
+    document.getElementById("wizard-next")?.addEventListener("click", () => {
+      const vals = getFormValues();
+      if (step === 1) {
+        if (!vals.name) { showToast("Введите название проекта!", "info"); return; }
+        if (!vals.shortDesc) { showToast("Введите краткое описание!", "info"); return; }
+        if (!vals.desc) { showToast("Введите полное описание!", "info"); return; }
+      }
+      if (step === 2 && !uploadedAvatarData && selectedEmoji === "📦") {
+        showToast("Выберите или загрузите иконку проекта!", "info");
+        return;
+      }
+      if (step === 3) {
+        if (vals.loaders.length === 0) { showToast("Выберите хотя бы один загрузчик!", "info"); return; }
+        if (vals.gameVersions.length === 0) { showToast("Выберите хотя бы одну версию Minecraft!", "info"); return; }
+      }
+      goToStep(step + 1);
+    });
+  }
+
+  function render() {
+    const currentUser = JSON.parse(localStorage.getItem("current_user") || "null");
+    const authorName = currentUser ? currentUser.username : "MineDev";
+
+    container.innerHTML = `
+    <div class="create-wizard">
+      <div class="wizard-header">
+        <div class="wizard-steps">
+          <div class="wizard-step active" data-step="1">
+            <div class="wizard-step-circle">1</div>
+            <div class="wizard-step-label">Основное</div>
+          </div>
+          <div class="wizard-step" data-step="2">
+            <div class="wizard-step-circle">2</div>
+            <div class="wizard-step-label">Медиа</div>
+          </div>
+          <div class="wizard-step" data-step="3">
+            <div class="wizard-step-circle">3</div>
+            <div class="wizard-step-label">Детали</div>
+          </div>
+          <div class="wizard-step" data-step="4">
+            <div class="wizard-step-circle">4</div>
+            <div class="wizard-step-label">Публикация</div>
+          </div>
+        </div>
+      </div>
+
       <form id="create-mod-form">
-        <div class="form-grid">
-          
-          <!-- Name -->
-          <div class="form-group">
-            <label class="form-label">Название проекта *</label>
-            <input type="text" class="form-input" id="form-name" required placeholder="Например: Create Astral">
+      <div class="wizard-body">
+
+        <!-- ===== STEP 1: Основное ===== -->
+        <div class="wizard-step-content active" data-step="1">
+
+          <div class="form-section">
+            <div class="form-section-title">
+              <span class="section-icon"><i class="fa-solid fa-signature"></i></span>
+              Название и тип проекта
+            </div>
+            <div class="form-section-desc">Дайте вашему проекту уникальное имя и выберите категорию</div>
+            <div class="form-grid">
+              <div class="form-group">
+                <label class="form-label">Название проекта *</label>
+                <input type="text" class="form-input" id="form-name" required placeholder="Например: Create Astral">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Уникальный ID (Slug) *</label>
+                <input type="text" class="form-input" id="form-slug" required placeholder="create-astral">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Тип проекта</label>
+                <select class="form-select" id="form-type">
+                  <option value="mod">Мод</option>
+                  <option value="modpack">Модпак</option>
+                  <option value="resourcepack">Шейдер / Текстурпак</option>
+                  <option value="plugin">Плагин</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Лицензия</label>
+                <input type="text" class="form-input" id="form-license" value="MIT" placeholder="MIT, LGPL-3.0, Proprietary">
+              </div>
+            </div>
           </div>
 
-          <!-- URL Slug -->
-          <div class="form-group">
-            <label class="form-label">Уникальный ID (Slug) *</label>
-            <input type="text" class="form-input" id="form-slug" required placeholder="create-astral">
+          <div class="form-section">
+            <div class="form-section-title">
+              <span class="section-icon"><i class="fa-solid fa-file-lines"></i></span>
+              Описание проекта
+            </div>
+            <div class="form-section-desc">Расскажите о возможностях, установке и особенностях вашего проекта</div>
+            <div class="form-group full-width" style="margin-bottom:16px;">
+              <label class="form-label">Краткое описание *</label>
+              <input type="text" class="form-input" id="form-short-desc" required placeholder="Кратко расскажите о функциях мода (до 120 символов)..." maxlength="150">
+              <div class="char-counter" id="short-desc-counter">0 / 150</div>
+            </div>
+            <div class="form-group full-width">
+              <label class="form-label">Полное описание * <span style="font-weight:400;color:var(--text-muted);font-size:12px;">(поддерживает HTML)</span></label>
+              <textarea class="form-textarea" id="form-desc" required placeholder="Подробно расскажите о функциях, инструкциях по установке и особенностях вашего дополнения..." style="min-height:180px;"></textarea>
+            </div>
           </div>
 
-          <!-- Type selection -->
-          <div class="form-group">
-            <label class="form-label">Тип проекта</label>
-            <select class="form-select" id="form-type">
-              <option value="mod">Мод</option>
-              <option value="modpack">Модпак</option>
-              <option value="resourcepack">Шейдер / Текстурпак</option>
-              <option value="plugin">Плагин</option>
-            </select>
+          <div class="form-section">
+            <div class="form-section-title">
+              <span class="section-icon"><i class="fa-solid fa-file-zipper"></i></span>
+              Файл проекта
+            </div>
+            <div class="form-section-desc">Загрузите .jar, .zip или .rar файл вашего проекта</div>
+            <div style="border: 2px dashed var(--border-color); padding: 28px; border-radius: var(--radius-md); text-align: center; background: rgba(255,255,255,0.02); transition:border-color 0.2s;" id="file-drop-zone">
+              <i class="fa-solid fa-cloud-arrow-up" style="font-size: 40px; color: var(--primary-color); opacity:0.6; margin-bottom:12px; display:block;"></i>
+              <label class="form-label" style="font-weight: 700; font-size:16px; cursor:pointer;">Нажмите, чтобы выбрать файл</label>
+              <input type="file" id="form-mod-file" required accept=".jar,.zip,.rar" style="display:none;">
+              <p style="font-size: 12px; color: var(--text-muted); margin-top: 8px;">.jar, .zip или .rar — макс. 1.5 MB для полного сохранения</p>
+              <div id="file-selected" style="display:none; margin-top:12px; padding:10px 16px; background:rgba(16,185,129,0.1); border-radius:var(--radius-sm); color:var(--success-color,#10b981); font-size:14px;"></div>
+            </div>
           </div>
 
-          <!-- License -->
-          <div class="form-group">
-            <label class="form-label">Лицензия</label>
-            <input type="text" class="form-input" id="form-license" value="MIT" placeholder="MIT, LGPL-3.0, Proprietary">
-          </div>
+        </div>
 
-          <!-- Mod File Upload -->
-          <div class="form-group full-width" style="border: 2px dashed var(--border-color); padding: 20px; border-radius: var(--radius-md); text-align: center; background: rgba(255,255,255,0.01); margin-bottom: 8px;">
-            <label class="form-label" style="font-weight: 700;"><i class="fa-solid fa-file-zipper" style="color: var(--primary-color); margin-right: 6px;"></i> Загрузить файл проекта (.jar, .zip) *</label>
-            <input type="file" id="form-mod-file" required accept=".jar,.zip,.rar" class="form-input" style="padding: 10px; margin-top: 8px; max-width: 100%;">
-            <p class="form-label" style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">Максимальный размер для сохранения в БД: 1.5 МБ. Более крупные файлы будут сохранены в виде метаданных.</p>
-          </div>
+        <!-- ===== STEP 2: Медиа ===== -->
+        <div class="wizard-step-content" data-step="2">
 
-          <!-- Avatar / Logo Customizer -->
-          <div class="form-group full-width">
-            <label class="form-label">Иконка проекта *</label>
+          <div class="form-section">
+            <div class="form-section-title">
+              <span class="section-icon"><i class="fa-solid fa-image"></i></span>
+              Иконка проекта
+            </div>
+            <div class="form-section-desc">Загрузите свою иконку, выберите из популярных или создайте в конструкторе</div>
             <div class="avatar-picker">
               <div class="avatar-preview" id="form-avatar-preview" style="background-color: ${selectedColor}">
                 ${selectedEmoji}
               </div>
-              <div class="avatar-inputs" style="display:flex; flex-direction:column; gap:12px;">
-                <div class="form-group" style="margin: 0; padding: 0;">
-                  <div class="form-label" style="font-size: 12px; color: var(--text-secondary);">Загрузить свою иконку (PNG/JPG):</div>
-                  <input type="file" id="form-icon-file" accept="image/*" class="form-input" style="padding: 6px 12px; font-size:12px; max-width: 320px;">
+              <div class="avatar-inputs">
+                <div class="form-group" style="margin:0;padding:0;">
+                  <div class="form-label" style="font-size:12px;color:var(--text-secondary);">Загрузить свою иконку (PNG/JPG):</div>
+                  <input type="file" id="form-icon-file" accept="image/*" class="form-input" style="padding:6px 12px;font-size:12px;">
                 </div>
-                
-                <div class="form-group" style="margin: 4px 0 0 0; padding: 0;">
-                  <div class="form-label" style="font-size: 12px; color: var(--text-secondary);">ИЛИ выберите оригинальную / готовую иконку:</div>
+                <div class="form-group" style="margin:4px 0 0 0;padding:0;">
+                  <div class="form-label" style="font-size:12px;color:var(--text-secondary);">ИЛИ выберите готовую иконку:</div>
                   <div class="preset-icons-grid">
                     ${presetIcons.map(p => `
                       <div class="preset-icon-item" title="${p.name}" data-url="${p.url}">
@@ -1916,21 +2087,18 @@ function renderCreateForm() {
                     `).join("")}
                   </div>
                 </div>
-
-                <div class="auth-divider" style="margin: 8px 0; font-size:11px;"><span>ИЛИ создать в конструкторе</span></div>
-
-                <div class="form-group" style="margin: 0; padding: 0;">
-                  <div class="form-label" style="font-size: 12px; color: var(--text-secondary);">Выберите символ:</div>
-                  <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                    ${emojis.map(e => `<span class="emoji-choice" style="cursor:pointer; font-size: 20px; padding: 4px; border-radius:4px;" data-emoji="${e}">${e}</span>`).join("")}
+                <div class="auth-divider" style="margin:8px 0;font-size:11px;"><span>ИЛИ создать в конструкторе</span></div>
+                <div class="form-group" style="margin:0;padding:0;">
+                  <div class="form-label" style="font-size:12px;color:var(--text-secondary);">Символ:</div>
+                  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    ${emojis.map(e => `<span class="emoji-choice" style="cursor:pointer;font-size:20px;padding:4px;border-radius:4px;" data-emoji="${e}">${e}</span>`).join("")}
                   </div>
                 </div>
-                
-                <div class="form-group" style="margin: 0; padding: 0;">
-                  <div class="form-label" style="font-size: 12px; color: var(--text-secondary);">Выберите цвет фона:</div>
+                <div class="form-group" style="margin:0;padding:0;">
+                  <div class="form-label" style="font-size:12px;color:var(--text-secondary);">Цвет фона:</div>
                   <div class="avatar-color-choices">
                     ${colors.map(c => `
-                      <div class="color-dot ${c === selectedColor ? 'selected' : ''}" style="background-color: ${c}" data-color="${c}"></div>
+                      <div class="color-dot ${c === selectedColor ? 'selected' : ''}" style="background-color:${c}" data-color="${c}"></div>
                     `).join("")}
                   </div>
                 </div>
@@ -1938,279 +2106,637 @@ function renderCreateForm() {
             </div>
           </div>
 
-          <!-- Short Description -->
-          <div class="form-group full-width">
-            <label class="form-label">Краткое описание проекта *</label>
-            <input type="text" class="form-input" id="form-short-desc" required placeholder="Кратко расскажите о функциях мода (до 120 символов)..." maxlength="150">
-          </div>
-
-          <!-- Long Description -->
-          <div class="form-group full-width">
-            <label class="form-label">Полное описание (Поддерживает HTML разметку) *</label>
-            <textarea class="form-textarea" id="form-desc" required placeholder="Подробно расскажите о функциях, инструкциях по установке и особенностях вашего дополнения..."></textarea>
-          </div>
-
-          <!-- Loaders -->
-          <div class="form-group full-width">
-            <label class="form-label">Поддерживаемые загрузчики</label>
-            <div class="form-checkbox-group">
-              ${Object.entries(METADATA.loaders).map(([key, label]) => `
-                <label class="form-checkbox-label">
-                  <input type="checkbox" name="form-loader" value="${key}">
-                  <span>${label}</span>
-                </label>
-              `).join("")}
+          <div class="form-section">
+            <div class="form-section-title">
+              <span class="section-icon"><i class="fa-solid fa-images"></i></span>
+              Скриншоты и обложка
             </div>
-          </div>
-
-          <!-- Game Versions -->
-          <div class="form-group full-width">
-            <label class="form-label">Поддерживаемые версии Minecraft</label>
-            <div class="version-range-picker" style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
-              <select class="form-input" id="form-version-from" style="flex:1; min-width:120px; padding:8px;">
-                <option value="">От версии</option>
-                ${METADATA.gameVersions.map(v => `<option value="${v}">${v}</option>`).join("")}
-              </select>
-              <select class="form-input" id="form-version-to" style="flex:1; min-width:120px; padding:8px;">
-                <option value="">До версии</option>
-                ${METADATA.gameVersions.map(v => `<option value="${v}">${v}</option>`).join("")}
-              </select>
-              <button type="button" class="btn btn-secondary btn-sm" id="form-version-range-btn">Выбрать диапазон</button>
-              <button type="button" class="btn btn-secondary btn-sm" id="form-version-clear-btn">Снять все</button>
+            <div class="form-section-desc">Добавьте до 8 скриншотов и обложку для страницы проекта</div>
+            
+            <div style="margin-bottom:16px;">
+              <label class="form-label">Обложка (баннер) — ссылка на изображение</label>
+              <input type="url" class="form-input" id="form-banner" placeholder="https://example.com/banner.png">
             </div>
-            <input type="text" class="form-input" id="form-version-search" placeholder="Поиск версии..." style="margin-bottom:8px;">
-            <div class="form-checkbox-group form-checkbox-scroll" id="form-version-list">
-              ${METADATA.gameVersions.map(v => `
-                <label class="form-checkbox-label form-version-item" data-version="${v}">
-                  <input type="checkbox" name="form-version" value="${v}">
-                  <span>${v}</span>
-                </label>
-              `).join("")}
+
+            <label class="form-label">Скриншоты (ссылки на изображения)</label>
+            <div class="screenshot-add">
+              <input type="url" class="form-input" id="form-scr-input" placeholder="https://example.com/screenshot.png">
+              <button type="button" class="btn btn-secondary" id="btn-add-scr">Добавить</button>
             </div>
-          </div>
-
-          <!-- Categories -->
-          <div class="form-group full-width">
-            <label class="form-label">Категории</label>
-            <div class="form-checkbox-group">
-              ${Object.entries(METADATA.categories).map(([key, label]) => `
-                <label class="form-checkbox-label">
-                  <input type="checkbox" name="form-category" value="${key}">
-                  <span>${label}</span>
-                </label>
-              `).join("")}
+            <div class="screenshot-grid" id="screenshot-grid">
+              ${screenshots.length === 0 ? '<p style="grid-column:1/-1;color:var(--text-muted);font-size:13px;padding:16px 0;">Скриншоты пока не добавлены</p>' : ''}
             </div>
-          </div>
-
-          <!-- Code Links -->
-          <div class="form-group">
-            <label class="form-label">Ссылка на исходный код (GitHub)</label>
-            <input type="url" class="form-input" id="form-source" placeholder="https://github.com/username/project">
-          </div>
-
-          <!-- Issues Link -->
-          <div class="form-group">
-            <label class="form-label">Ссылка на трекер ошибок (Issues)</label>
-            <input type="url" class="form-input" id="form-issues" placeholder="https://github.com/username/project/issues">
           </div>
 
         </div>
 
-        <div class="form-actions">
-          <button type="button" class="btn btn-secondary" id="btn-cancel-create">Отменить</button>
-          <button type="submit" class="btn btn-primary"><i class="fa-solid fa-upload"></i> Опубликовать проект</button>
+        <!-- ===== STEP 3: Детали ===== -->
+        <div class="wizard-step-content" data-step="3">
+
+          <div class="form-section">
+            <div class="form-section-title">
+              <span class="section-icon"><i class="fa-solid fa-microchip"></i></span>
+              Окружение
+            </div>
+            <div class="form-section-desc">Укажите поддерживаемые загрузчики, версии Minecraft и категории</div>
+
+            <div class="form-group full-width" style="margin-bottom:16px;">
+              <label class="form-label">Загрузчики</label>
+              <div class="form-checkbox-group">
+                ${Object.entries(METADATA.loaders).map(([key, label]) => `
+                  <label class="form-checkbox-label">
+                    <input type="checkbox" name="form-loader" value="${key}">
+                    <span>${label}</span>
+                  </label>
+                `).join("")}
+              </div>
+            </div>
+
+            <div class="form-group full-width" style="margin-bottom:16px;">
+              <label class="form-label">Версии Minecraft</label>
+              <div class="version-range-picker" style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+                <select class="form-input" id="form-version-from" style="flex:1;min-width:120px;padding:8px;">
+                  <option value="">От версии</option>
+                  ${METADATA.gameVersions.map(v => `<option value="${v}">${v}</option>`).join("")}
+                </select>
+                <select class="form-input" id="form-version-to" style="flex:1;min-width:120px;padding:8px;">
+                  <option value="">До версии</option>
+                  ${METADATA.gameVersions.map(v => `<option value="${v}">${v}</option>`).join("")}
+                </select>
+                <button type="button" class="btn btn-secondary btn-sm" id="form-version-range-btn">Диапазон</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="form-version-clear-btn">Снять все</button>
+              </div>
+              <input type="text" class="form-input" id="form-version-search" placeholder="Поиск версии..." style="margin-bottom:8px;">
+              <div class="form-checkbox-group form-checkbox-scroll" id="form-version-list">
+                ${METADATA.gameVersions.map(v => `
+                  <label class="form-checkbox-label form-version-item" data-version="${v}">
+                    <input type="checkbox" name="form-version" value="${v}">
+                    <span>${v}</span>
+                  </label>
+                `).join("")}
+              </div>
+            </div>
+
+            <div class="form-group full-width">
+              <label class="form-label">Категории</label>
+              <div class="form-checkbox-group">
+                ${Object.entries(METADATA.categories).map(([key, label]) => `
+                  <label class="form-checkbox-label">
+                    <input type="checkbox" name="form-category" value="${key}">
+                    <span>${label}</span>
+                  </label>
+                `).join("")}
+              </div>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <div class="form-section-title">
+              <span class="section-icon"><i class="fa-solid fa-tags"></i></span>
+              Теги
+            </div>
+            <div class="form-section-desc">Добавьте теги для улучшения поиска (нажмите Enter после ввода)</div>
+            <div class="tags-container" id="tags-container">
+              ${tags.map(t => `<span class="tag-chip">${t} <span class="tag-remove" data-tag="${t}">&times;</span></span>`).join("")}
+              <input type="text" class="tags-input-field" id="tags-input" placeholder="${tags.length ? 'Ещё тег...' : 'Введите тег и нажмите Enter...'}">
+            </div>
+          </div>
+
+          <div class="form-section">
+            <div class="form-section-title">
+              <span class="section-icon"><i class="fa-solid fa-server"></i></span>
+              Системные требования
+            </div>
+            <div class="form-section-desc">Рекомендуемые требования для запуска проекта</div>
+            <div class="req-grid">
+              <div class="req-item">
+                <label>Java</label>
+                <select class="form-input" id="form-java">
+                  <option value="">Не указано</option>
+                  <option value="8">Java 8</option>
+                  <option value="11">Java 11</option>
+                  <option value="17">Java 17</option>
+                  <option value="21">Java 21</option>
+                </select>
+              </div>
+              <div class="req-item">
+                <label>RAM (мин.)</label>
+                <select class="form-input" id="form-ram">
+                  <option value="">Не указано</option>
+                  <option value="1 GB">1 GB</option>
+                  <option value="2 GB">2 GB</option>
+                  <option value="4 GB">4 GB</option>
+                  <option value="8 GB">8 GB</option>
+                  <option value="16 GB">16 GB</option>
+                </select>
+              </div>
+              <div class="req-item">
+                <label>Сложность установки</label>
+                <select class="form-input" id="form-difficulty">
+                  <option value="">Не указано</option>
+                  <option value="easy">Лёгкая</option>
+                  <option value="medium">Средняя</option>
+                  <option value="hard">Сложная</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <div class="form-section-title">
+              <span class="section-icon"><i class="fa-solid fa-link"></i></span>
+              Ссылки
+            </div>
+            <div class="form-section-desc">Полезные ссылки для сообщества</div>
+            <div class="form-grid">
+              <div class="form-group">
+                <label class="form-label">Исходный код (GitHub)</label>
+                <input type="url" class="form-input" id="form-source" placeholder="https://github.com/username/project">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Трекер ошибок</label>
+                <input type="url" class="form-input" id="form-issues" placeholder="https://github.com/username/project/issues">
+              </div>
+            </div>
+            <div style="margin-top:12px;">
+              <label class="form-label">Discord-сервер</label>
+              <div class="link-input-row">
+                <span class="link-icon" style="color:#5865F2;"><i class="fa-brands fa-discord"></i></span>
+                <input type="url" class="form-input" id="form-discord" placeholder="https://discord.gg/invite" value="${discordUrl}">
+              </div>
+            </div>
+            <div style="margin-top:12px;">
+              <label class="form-label">Поддержка / Донаты</label>
+              <div class="link-input-row">
+                <span class="link-icon" style="color:#FF424D;"><i class="fa-brands fa-patreon"></i></span>
+                <input type="url" class="form-input" id="form-donate-patreon" placeholder="https://patreon.com/username" value="${donationPatreon}">
+              </div>
+              <div class="link-input-row">
+                <span class="link-icon" style="color:#FF5E5B;"><i class="fa-solid fa-mug-hot"></i></span>
+                <input type="url" class="form-input" id="form-donate-kofi" placeholder="https://ko-fi.com/username" value="${donationKofi}">
+              </div>
+              <div class="link-input-row">
+                <span class="link-icon" style="color:#00457C;"><i class="fa-brands fa-paypal"></i></span>
+                <input type="url" class="form-input" id="form-donate-paypal" placeholder="https://paypal.me/username" value="${donationPaypal}">
+              </div>
+            </div>
+          </div>
+
         </div>
+
+        <!-- ===== STEP 4: Публикация ===== -->
+        <div class="wizard-step-content" data-step="4">
+
+          <div class="form-section">
+            <div class="form-section-title">
+              <span class="section-icon"><i class="fa-solid fa-clock-rotate-left"></i></span>
+              Чейнджлог первой версии
+            </div>
+            <div class="form-section-desc">Опишите, что нового в этой версии проекта</div>
+            <textarea class="form-textarea changelog-textarea" id="form-changelog" placeholder="- Добавлена новая механика&#10;- Исправлены баги&#10;- Оптимизирован рендеринг"></textarea>
+          </div>
+
+          <div class="form-section">
+            <div class="form-section-title">
+              <span class="section-icon"><i class="fa-solid fa-eye"></i></span>
+              Предпросмотр страницы проекта
+            </div>
+            <div class="form-section-desc">Так будет выглядеть страница вашего проекта</div>
+            <div class="create-preview">
+              <div class="preview-card">
+                <div class="preview-card-icon" id="preview-icon" style="background-color:${selectedColor}">${selectedEmoji}</div>
+                <div class="preview-card-info">
+                  <div class="preview-card-title" id="preview-name">Название проекта</div>
+                  <div class="preview-card-author" id="preview-author">${authorName}</div>
+                  <div class="preview-card-desc" id="preview-desc">Краткое описание проекта</div>
+                  <div class="preview-card-meta">
+                    <span class="preview-card-meta-item" id="preview-type"><i class="fa-solid fa-tag"></i> Мод</span>
+                    <span class="preview-card-meta-item" id="preview-loaders"><i class="fa-solid fa-cube"></i> Fabric</span>
+                    <span class="preview-card-meta-item" id="preview-versions"><i class="fa-solid fa-layer-group"></i> 1.20.1</span>
+                  </div>
+                </div>
+              </div>
+              <div class="preview-card-footer" id="preview-tags">
+                <span class="preview-tag">tech</span>
+                <span class="preview-tag">adventure</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <div class="form-section-title">
+              <span class="section-icon"><i class="fa-solid fa-list-check"></i></span>
+              Итоговая сводка
+            </div>
+            <div class="form-section-desc">Проверьте все данные перед публикацией</div>
+            <table class="summary-table" id="summary-table">
+              <tr><td>Название</td><td id="sum-name">—</td></tr>
+              <tr><td>Тип</td><td id="sum-type">—</td></tr>
+              <tr><td>Категории</td><td id="sum-cats">—</td></tr>
+              <tr><td>Загрузчики</td><td id="sum-loaders">—</td></tr>
+              <tr><td>Версии</td><td id="sum-versions">—</td></tr>
+              <tr><td>Теги</td><td id="sum-tags">—</td></tr>
+              <tr><td>Лицензия</td><td id="sum-license">—</td></tr>
+              <tr><td>Файл</td><td id="sum-file">—</td></tr>
+            </table>
+          </div>
+
+        </div>
+
+      </div>
+
+      <div class="wizard-nav" id="wizard-nav"></div>
       </form>
     </div>
-  `;
+    `;
 
-  // --- INTERACTIVE EVENTS ---
+    renderNav();
+    setupEvents();
+    updateSummary();
+    updatePreview();
+  }
 
-  const previewEl = document.getElementById("form-avatar-preview");
-  const fileInput = document.getElementById("form-icon-file");
-  let uploadedAvatarData = null;
-
-  // File Upload handling
-  fileInput.addEventListener("change", (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      if (file.size > 2 * 1024 * 1024) { // limit 2MB
-        showToast("Размер файла не должен превышать 2 МБ!", "info");
-        fileInput.value = "";
-        return;
-      }
-      document.querySelectorAll(".preset-icon-item").forEach(i => i.classList.remove("selected"));
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        uploadedAvatarData = event.target.result;
-        previewEl.innerHTML = `<img src="${uploadedAvatarData}" style="width:100%; height:100%; object-fit:cover; border-radius:inherit;">`;
-      };
-      reader.readAsDataURL(file);
+  function setupEvents() {
+    // Slug auto-generate
+    const nameInput = document.getElementById("form-name");
+    const slugInput = document.getElementById("form-slug");
+    let slugManuallyEdited = false;
+    if (nameInput && slugInput) {
+      nameInput.addEventListener("input", () => {
+        if (!slugManuallyEdited) {
+          slugInput.value = nameInput.value.toLowerCase().replace(/[^a-z0-9а-яё\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-").replace(/^[-]+|[-]+$/g, "");
+        }
+        updateSummary();
+        updatePreview();
+      });
+      slugInput.addEventListener("input", () => {
+        slugManuallyEdited = true;
+        updateSummary();
+        updatePreview();
+      });
     }
-  });
 
-  // Project Mod File Reader
-  let modFileName = "";
-  let modFileSize = "";
-  let modFileData = "";
+    // Character counter
+    const shortDesc = document.getElementById("form-short-desc");
+    const counter = document.getElementById("short-desc-counter");
+    if (shortDesc && counter) {
+      shortDesc.addEventListener("input", () => {
+        const len = shortDesc.value.length;
+        counter.textContent = len + " / 150";
+        counter.classList.toggle("over", len > 140);
+        updatePreview();
+      });
+    }
 
-  setTimeout(() => {
-    const modFileInput = document.getElementById("form-mod-file");
-    if (modFileInput) {
-      modFileInput.addEventListener("change", (e) => {
+    // Real-time preview update for all fields
+    document.querySelectorAll("#form-desc, #form-type, #form-license").forEach(el => {
+      if (el) el.addEventListener("input", () => { updatePreview(); updateSummary(); });
+    });
+    document.querySelectorAll("input[name='form-loader'], input[name='form-version'], input[name='form-category']").forEach(el => {
+      if (el) el.addEventListener("change", () => { updatePreview(); updateSummary(); });
+    });
+
+    // Avatar file upload
+    const previewEl = document.getElementById("form-avatar-preview");
+    const fileInput = document.getElementById("form-icon-file");
+    if (fileInput && previewEl) {
+      fileInput.addEventListener("change", (e) => {
         const file = e.target.files[0];
-        if (file) {
+        if (!file) return;
+        if (file.size > 2 * 1024 * 1024) {
+          showToast("Размер файла не должен превышать 2 МБ!", "info");
+          fileInput.value = "";
+          return;
+        }
+        document.querySelectorAll(".preset-icon-item").forEach(i => i.classList.remove("selected"));
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          uploadedAvatarData = event.target.result;
+          previewEl.innerHTML = `<img src="${uploadedAvatarData}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit;">`;
+          updatePreview();
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    // Project file upload (with drop zone styling)
+    setTimeout(() => {
+      const modFileInput = document.getElementById("form-mod-file");
+      const fileSelected = document.getElementById("file-selected");
+      const dropZone = document.getElementById("file-drop-zone");
+      if (modFileInput) {
+        modFileInput.addEventListener("change", (e) => {
+          const file = e.target.files[0];
+          if (!file) return;
           modFileName = file.name;
           modFileSize = (file.size / (1024 * 1024)).toFixed(2) + " MB";
-          
           if (file.size > 1.5 * 1024 * 1024) {
             modFileData = "data:application/octet-stream;base64,TW9kU3BoZXJlTW9kRmlsZUNvbnRlbnRzTW9ja1VwbG9hZA==";
-            showToast("Файл сохранен (сжатая демо-версия для экономии локального хранилища)", "info");
+            showToast("Файл сохранен (сжатая демо-версия)", "info");
           } else {
             const reader = new FileReader();
-            reader.onload = (event) => {
-              modFileData = event.target.result;
-            };
+            reader.onload = (event) => { modFileData = event.target.result; };
             reader.readAsDataURL(file);
           }
+          if (fileSelected) {
+            fileSelected.style.display = "block";
+            fileSelected.innerHTML = `<i class="fa-solid fa-check-circle"></i> ${modFileName} (${modFileSize})`;
+          }
+          if (dropZone) {
+            dropZone.style.borderColor = "var(--success-color, #10b981)";
+            dropZone.style.background = "rgba(16,185,129,0.05)";
+          }
+          updateSummary();
+        });
+        // Click on drop zone triggers file input
+        if (dropZone) {
+          dropZone.addEventListener("click", () => modFileInput.click());
+          dropZone.addEventListener("dragover", (e) => { e.preventDefault(); dropZone.style.borderColor = "var(--primary-color)"; });
+          dropZone.addEventListener("dragleave", () => { dropZone.style.borderColor = "var(--border-color)"; });
+          dropZone.addEventListener("drop", (e) => { e.preventDefault(); if (e.dataTransfer.files.length) { modFileInput.files = e.dataTransfer.files; modFileInput.dispatchEvent(new Event("change")); } });
+        }
+      }
+    }, 100);
+
+    // Preset icon choices
+    document.querySelectorAll(".preset-icon-item").forEach(item => {
+      item.addEventListener("click", () => {
+        document.querySelectorAll(".preset-icon-item").forEach(i => i.classList.remove("selected"));
+        item.classList.add("selected");
+        uploadedAvatarData = item.getAttribute("data-url");
+        if (fileInput) fileInput.value = "";
+        if (previewEl) previewEl.innerHTML = `<img src="${uploadedAvatarData}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit;">`;
+        updatePreview();
+      });
+    });
+
+    // Emoji choices
+    document.querySelectorAll(".emoji-choice").forEach(choice => {
+      choice.addEventListener("click", () => {
+        document.querySelectorAll(".preset-icon-item").forEach(i => i.classList.remove("selected"));
+        selectedEmoji = choice.getAttribute("data-emoji");
+        uploadedAvatarData = null;
+        if (fileInput) fileInput.value = "";
+        if (previewEl) { previewEl.textContent = selectedEmoji; previewEl.style.backgroundColor = selectedColor; }
+        updatePreview();
+      });
+    });
+
+    // Color choices
+    document.querySelectorAll(".color-dot").forEach(dot => {
+      dot.addEventListener("click", () => {
+        document.querySelectorAll(".color-dot").forEach(d => d.classList.remove("selected"));
+        dot.classList.add("selected");
+        selectedColor = dot.getAttribute("data-color");
+        if (!uploadedAvatarData || (!uploadedAvatarData.startsWith('http') && !uploadedAvatarData.startsWith('data:image'))) {
+          if (previewEl) previewEl.style.backgroundColor = selectedColor;
+        }
+        updatePreview();
+      });
+    });
+
+    // Version search
+    const formVersionSearch = document.getElementById("form-version-search");
+    if (formVersionSearch) {
+      formVersionSearch.addEventListener("input", () => {
+        const q = formVersionSearch.value.trim().toLowerCase();
+        document.querySelectorAll(".form-version-item").forEach(item => {
+          item.style.display = !q || (item.getAttribute("data-version") || "").includes(q) ? "" : "none";
+        });
+      });
+    }
+
+    // Version range
+    document.getElementById("form-version-range-btn")?.addEventListener("click", () => {
+      const from = document.getElementById("form-version-from")?.value;
+      const to = document.getElementById("form-version-to")?.value;
+      if (!from || !to) { showToast("Выберите начальную и конечную версию", "info"); return; }
+      getVersionsInRange(from, to).forEach(v => {
+        const cb = document.querySelector(`input[name="form-version"][value="${v}"]`);
+        if (cb) cb.checked = true;
+      });
+      showToast(`Выбрано версий: ${getVersionsInRange(from, to).length}`, "success");
+      updatePreview();
+      updateSummary();
+    });
+
+    document.getElementById("form-version-clear-btn")?.addEventListener("click", () => {
+      document.querySelectorAll('input[name="form-version"]').forEach(cb => { cb.checked = false; });
+      updatePreview();
+      updateSummary();
+    });
+
+    // Tags input
+    const tagsInput = document.getElementById("tags-input");
+    const tagsContainer = document.getElementById("tags-container");
+    if (tagsInput && tagsContainer) {
+      tagsInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          const val = tagsInput.value.trim().toLowerCase();
+          if (val && !tags.includes(val) && tags.length < 15) {
+            tags.push(val);
+            renderTags();
+            tagsInput.value = "";
+            tagsInput.placeholder = tags.length ? "Ещё тег..." : "Введите тег и нажмите Enter...";
+            updatePreview();
+            updateSummary();
+          } else if (tags.includes(val)) {
+            showToast("Тег уже добавлен", "info");
+          } else if (tags.length >= 15) {
+            showToast("Максимум 15 тегов", "info");
+          }
+        }
+        if (e.key === "Backspace" && !tagsInput.value && tags.length) {
+          tags.pop();
+          renderTags();
+          updatePreview();
+          updateSummary();
+        }
+      });
+      // Click on container focuses input
+      tagsContainer.addEventListener("click", (e) => {
+        if (e.target === tagsContainer || e.target.classList.contains("tags-input-field")) {
+          tagsInput.focus();
+        }
+      });
+      // Remove tag via delegation
+      tagsContainer.addEventListener("click", (e) => {
+        if (e.target.classList.contains("tag-remove")) {
+          const t = e.target.getAttribute("data-tag");
+          tags = tags.filter(tg => tg !== t);
+          renderTags();
+          updatePreview();
+          updateSummary();
         }
       });
     }
-  }, 100);
 
-  // Preset icon choices
-  document.querySelectorAll(".preset-icon-item").forEach(item => {
-    item.addEventListener("click", () => {
-      document.querySelectorAll(".preset-icon-item").forEach(i => i.classList.remove("selected"));
-      item.classList.add("selected");
-      uploadedAvatarData = item.getAttribute("data-url");
-      fileInput.value = ""; // Clear file input
-      previewEl.innerHTML = `<img src="${uploadedAvatarData}" style="width:100%; height:100%; object-fit:cover; border-radius:inherit;">`;
+    // Screenshots
+    document.getElementById("btn-add-scr")?.addEventListener("click", () => {
+      const input = document.getElementById("form-scr-input");
+      const url = input?.value?.trim();
+      if (!url) { showToast("Введите URL скриншота", "info"); return; }
+      if (screenshots.length >= 8) { showToast("Максимум 8 скриншотов", "info"); return; }
+      screenshots.push(url);
+      if (input) input.value = "";
+      renderScreenshots();
     });
-  });
-
-  // Custom Emoji choices
-  document.querySelectorAll(".emoji-choice").forEach(choice => {
-    choice.addEventListener("click", () => {
-      document.querySelectorAll(".preset-icon-item").forEach(i => i.classList.remove("selected"));
-      selectedEmoji = choice.getAttribute("data-emoji");
-      uploadedAvatarData = null; // Reset file/preset upload
-      fileInput.value = ""; // Clear file input
-      previewEl.textContent = selectedEmoji;
-      previewEl.style.backgroundColor = selectedColor;
+    // Allow Enter to add
+    document.getElementById("form-scr-input")?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); document.getElementById("btn-add-scr")?.click(); }
     });
-  });
 
-  // Color selection choices
-  document.querySelectorAll(".color-dot").forEach(dot => {
-    dot.addEventListener("click", () => {
-      document.querySelectorAll(".color-dot").forEach(d => d.classList.remove("selected"));
-      dot.classList.add("selected");
-      selectedColor = dot.getAttribute("data-color");
-      if (!uploadedAvatarData || (!uploadedAvatarData.startsWith('http') && !uploadedAvatarData.startsWith('data:image'))) {
-        previewEl.style.backgroundColor = selectedColor;
-      }
+    // Donation fields auto-save
+    ["form-donate-patreon", "form-donate-kofi", "form-donate-paypal", "form-discord"].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener("input", () => {
+        if (id === "form-donate-patreon") donationPatreon = el.value;
+        else if (id === "form-donate-kofi") donationKofi = el.value;
+        else if (id === "form-donate-paypal") donationPaypal = el.value;
+        else if (id === "form-discord") discordUrl = el.value;
+      });
     });
-  });
 
-  // Cancel Button
-  document.getElementById("btn-cancel-create").addEventListener("click", () => {
-    window.location.hash = "#/";
-  });
+    // Form Submission
+    const form = document.getElementById("create-mod-form");
+    if (form) {
+      form.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const vals = getFormValues();
 
-  const formVersionSearch = document.getElementById("form-version-search");
-  if (formVersionSearch) {
-    formVersionSearch.addEventListener("input", () => {
-      const q = formVersionSearch.value.trim().toLowerCase();
-      document.querySelectorAll(".form-version-item").forEach(item => {
-        item.style.display = !q || (item.getAttribute("data-version") || "").includes(q) ? "" : "none";
+        if (!vals.name) { showToast("Введите название проекта!", "info"); return; }
+        if (!vals.shortDesc) { showToast("Введите краткое описание!", "info"); return; }
+        if (!vals.desc) { showToast("Введите полное описание!", "info"); return; }
+        if (!uploadedAvatarData && selectedEmoji === "📦") { showToast("Выберите или загрузите иконку проекта!", "info"); return; }
+        if (vals.loaders.length === 0) { showToast("Выберите хотя бы один загрузчик!", "info"); return; }
+        if (vals.gameVersions.length === 0) { showToast("Выберите хотя бы одну версию Minecraft!", "info"); return; }
+        
+        const slug = vals.slug || vals.name.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+        const currentUser = JSON.parse(localStorage.getItem("current_user"));
+        const authorName = currentUser ? currentUser.username : "MineDev";
+
+        // Build donation URL
+        let donationUrl = donationPatreon || donationKofi || donationPaypal || "";
+
+        const newMod = {
+          id: slug,
+          name: vals.name,
+          slug,
+          author: authorName,
+          avatar: uploadedAvatarData || selectedEmoji,
+          iconColor: selectedColor,
+          shortDescription: vals.shortDesc,
+          description: vals.desc,
+          type: vals.type,
+          categories: vals.categories,
+          loaders: vals.loaders,
+          gameVersions: vals.gameVersions,
+          downloads: 0,
+          follows: 0,
+          license: vals.license,
+          sourceUrl: vals.source || null,
+          issuesUrl: vals.issues || null,
+          tags: tags,
+          gallery: screenshots,
+          donationUrl: donationUrl || null,
+          donationLinks: { patreon: donationPatreon, kofi: donationKofi, paypal: donationPaypal },
+          discordUrl: discordUrl || null,
+          bannerImage: document.getElementById("form-banner")?.value?.trim() || null,
+          requirements: { java: vals.javaVer, ram: vals.ramMin, difficulty: document.getElementById("form-difficulty")?.value || "" },
+          filename: modFileName || `${slug}-1.0.0.jar`,
+          fileSize: modFileSize || "450 KB",
+          fileData: modFileData || "",
+          approved: false
+        };
+
+        saveMod(newMod);
+        logActivity("mod_create", newMod.name);
+
+        // Update changelog if provided
+        if (vals.changelog) {
+          const mods = getMods();
+          const saved = mods.find(m => m.id === slug);
+          if (saved && saved.versions && saved.versions[0]) {
+            saved.versions[0].changelog = vals.changelog;
+            localStorage.setItem("mods_data", JSON.stringify(mods));
+          }
+        }
+
+        showToast("Проект успешно создан и отправлен на модерацию!", "success");
+        setTimeout(() => { window.location.hash = `#/mod/${slug}`; }, 800);
+      });
+    }
+  }
+
+  function renderTags() {
+    const container = document.getElementById("tags-container");
+    const input = document.getElementById("tags-input");
+    if (!container || !input) return;
+    const chips = tags.map(t => `<span class="tag-chip">${t} <span class="tag-remove" data-tag="${t}">&times;</span></span>`).join("");
+    container.innerHTML = chips + `<input type="text" class="tags-input-field" id="tags-input" placeholder="${tags.length ? 'Ещё тег...' : 'Введите тег и нажмите Enter...'}">`;
+    const newInput = document.getElementById("tags-input");
+    if (newInput) {
+      newInput.focus();
+      newInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          const val = newInput.value.trim().toLowerCase();
+          if (val && !tags.includes(val) && tags.length < 15) {
+            tags.push(val);
+            renderTags();
+            updatePreview();
+            updateSummary();
+          } else if (tags.includes(val)) { showToast("Тег уже добавлен", "info"); }
+          else if (tags.length >= 15) { showToast("Максимум 15 тегов", "info"); }
+        }
+        if (e.key === "Backspace" && !newInput.value && tags.length) {
+          tags.pop();
+          renderTags();
+          updatePreview();
+          updateSummary();
+        }
+      });
+    }
+  }
+
+  function renderScreenshots() {
+    const grid = document.getElementById("screenshot-grid");
+    if (!grid) return;
+    if (screenshots.length === 0) {
+      grid.innerHTML = '<p style="grid-column:1/-1;color:var(--text-muted);font-size:13px;padding:16px 0;">Скриншоты пока не добавлены</p>';
+      return;
+    }
+    grid.innerHTML = screenshots.map((url, i) => `
+      <div class="screenshot-item">
+        <img src="${url}" alt="Скриншот ${i+1}" loading="lazy" onerror="this.parentElement.innerHTML='<div style=\\'padding:20px;text-align:center;color:var(--text-muted);font-size:12px;\\'>Ошибка загрузки</div>'">
+        <div class="screenshot-overlay">Скриншот #${i+1}</div>
+        <button type="button" class="screenshot-remove" data-idx="${i}">&times;</button>
+      </div>
+    `).join("");
+    grid.querySelectorAll(".screenshot-remove").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const idx = parseInt(btn.getAttribute("data-idx"));
+        screenshots.splice(idx, 1);
+        renderScreenshots();
       });
     });
   }
 
-  document.getElementById("form-version-range-btn")?.addEventListener("click", () => {
-    const from = document.getElementById("form-version-from")?.value;
-    const to = document.getElementById("form-version-to")?.value;
-    if (!from || !to) {
-      showToast("Выберите начальную и конечную версию", "info");
-      return;
-    }
-    getVersionsInRange(from, to).forEach(v => {
-      const cb = document.querySelector(`input[name="form-version"][value="${v}"]`);
-      if (cb) cb.checked = true;
-    });
-    showToast(`Выбрано версий: ${getVersionsInRange(from, to).length}`, "success");
-  });
+  function updateSummary() {
+    const vals = getFormValues();
+    const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val || "—"; };
+    set("sum-name", vals.name || "—");
+    set("sum-type", vals.type || "—");
+    set("sum-cats", vals.categories.map(c => METADATA.categories[c] || c).join(", ") || "—");
+    set("sum-loaders", vals.loaders.map(l => METADATA.loaders[l] || l).join(", ") || "—");
+    set("sum-versions", vals.gameVersions.join(", ") || "—");
+    set("sum-tags", tags.length ? tags.join(", ") : "—");
+    set("sum-license", vals.license || "—");
+    set("sum-file", modFileName || "Файл не выбран");
+  }
 
-  document.getElementById("form-version-clear-btn")?.addEventListener("click", () => {
-    document.querySelectorAll('input[name="form-version"]').forEach(cb => { cb.checked = false; });
-  });
-
-  // Form Submission
-  const form = document.getElementById("create-mod-form");
-  form.addEventListener("submit", (e) => {
-    e.preventDefault();
-
-    // Collect data
-    const name = document.getElementById("form-name").value.trim();
-    const slug = document.getElementById("form-slug").value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
-    const type = document.getElementById("form-type").value;
-    const license = document.getElementById("form-license").value.trim() || "MIT";
-    const shortDesc = document.getElementById("form-short-desc").value.trim();
-    const desc = document.getElementById("form-desc").value.trim();
-    const source = document.getElementById("form-source").value.trim();
-    const issues = document.getElementById("form-issues").value.trim();
-    
-    const loaders = Array.from(document.querySelectorAll('input[name="form-loader"]:checked')).map(c => c.value);
-    const gameVersions = Array.from(document.querySelectorAll('input[name="form-version"]:checked')).map(c => c.value);
-    const categories = Array.from(document.querySelectorAll('input[name="form-category"]:checked')).map(c => c.value);
-
-    // Validations
-    if (loaders.length === 0) {
-      showToast("Выберите хотя бы один загрузчик модов!", "info");
-      return;
-    }
-    if (gameVersions.length === 0) {
-      showToast("Выберите хотя бы одну версию игры!", "info");
-      return;
-    }
-
-    const currentUser = JSON.parse(localStorage.getItem("current_user"));
-    const authorName = currentUser ? currentUser.username : "MineDev";
-
-    const newMod = {
-      id: slug,
-      name,
-      slug,
-      author: authorName,
-      avatar: uploadedAvatarData || selectedEmoji,
-      iconColor: selectedColor,
-      shortDescription: shortDesc,
-      description: desc,
-      type,
-      categories,
-      loaders,
-      gameVersions,
-      downloads: 0,
-      follows: 0,
-      license,
-      sourceUrl: source || null,
-      issuesUrl: issues || null,
-      gallery: [],
-      filename: modFileName || `${slug}-1.0.0.jar`,
-      fileSize: modFileSize || "450 KB",
-      fileData: modFileData || "",
-      approved: false
-    };
-
-    saveMod(newMod);
-    logActivity("mod_create", newMod.name);
-    showToast("Проект успешно создан и отправлен на модерацию!", "success");
-
-    setTimeout(() => {
-      window.location.hash = `#/mod/${slug}`;
-    }, 800);
-  });
+  render();
 }
 
 function formatDate(dateString) {
@@ -3488,6 +4014,8 @@ const ADMIN_FUNCTIONS = {
   smtp_test: { icon: 'fa-paper-plane', label: 'Тест SMTP' },
 };
 
+window.ADMIN_FUNCTIONS = ADMIN_FUNCTIONS;
+
 const ADMIN_FUNCTION_GROUPS = [
   { name: 'Модерация', items: ['mods', 'allmods', 'users', 'reports'] },
   { name: 'Управление', items: ['settings', 'notifications', 'security', 'banners', 'categories', 'tags', 'comment_mod'] },
@@ -3495,6 +4023,8 @@ const ADMIN_FUNCTION_GROUPS = [
   { name: 'Обслуживание', items: ['tools', 'system', 'db_backup', 'db_restore', 'clear_logs', 'cleanup', 'integrity', 'report_gen'] },
   { name: 'Системное', items: ['api_settings', 'cdn_settings', 'mass_mail', 'ip_blacklist', 'privacy', 'theme_io', 'access_keys', 'smtp_test'] },
 ];
+
+window.ADMIN_FUNCTION_GROUPS = ADMIN_FUNCTION_GROUPS;
 
 const MEME_FUNCTIONS = [
   { id: 'slow', icon: 'fa-turtle', label: 'Черепашья скорость', desc: 'Замедляет всю анимацию' },
@@ -3829,7 +4359,11 @@ function renderAdminPanel(activeTab = "mods", searchQuery = "", modSearchQuery =
         </div>
       `,
     };
-    return contents[fnId] || renderEmptyState('Функция "' + (ADMIN_FUNCTIONS[fnId]?.label || fnId) + '"');
+    if (contents[fnId]) return contents[fnId];
+    if (window.EXTRA_ADMIN && window.EXTRA_ADMIN[fnId] && typeof window.EXTRA_ADMIN[fnId].render === 'function') {
+      return window.EXTRA_ADMIN[fnId].render();
+    }
+    return renderEmptyState('Функция "' + (ADMIN_FUNCTIONS[fnId]?.label || fnId) + '"');
   }
 
   container.innerHTML = `
