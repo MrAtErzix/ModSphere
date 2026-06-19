@@ -3998,7 +3998,7 @@ function renderAdminPanel(activeTab = "mods", searchQuery = "", modSearchQuery =
                   </div>
                   <div class="admin-user-actions">
                     <button class="btn btn-secondary btn-sm" onclick="openPublicProfileModal('${u.username.replace(/'/g, "\\'")}')" title="Профиль"><i class="fa-solid fa-eye"></i></button>
-                    ${currentUser.role === 'OWNER' || (currentUser.role === 'ADMIN' && u.role !== 'OWNER' && u.uid !== currentUser.uid) ? `
+                    ${(currentUser.role === 'OWNER' && u.uid !== currentUser.uid) || (currentUser.role === 'ADMIN' && u.role !== 'OWNER' && u.uid !== currentUser.uid) ? `
                       <select class="form-input" style="padding: 4px 8px; font-size: 12px; width: 120px;" onchange="changeUserRole('${u.uid}', this.value)">
                         <option value="PLAYER" ${(u.role === 'PLAYER' || u.role === 'USER') ? 'selected' : ''}>Игрок</option>
                         <option value="MODERATOR" ${u.role === 'MODERATOR' ? 'selected' : ''}>Модератор</option>
@@ -4264,6 +4264,12 @@ window.rejectPendingMod = function(modId) {
 }
 
 window.changeUserRole = function(uid, newRole) {
+  const currentUser = JSON.parse(localStorage.getItem("current_user"));
+  if (currentUser && currentUser.uid === uid) {
+    showToast("Нельзя изменить свою собственную привилегию!", "error");
+    renderAdminPanel("users");
+    return;
+  }
   const registeredUsers = JSON.parse(localStorage.getItem("registered_users") || "[]");
   const user = registeredUsers.find(u => u.uid === uid);
   if (user) {
@@ -4271,16 +4277,10 @@ window.changeUserRole = function(uid, newRole) {
     user.role = newRole;
     localStorage.setItem("registered_users", JSON.stringify(registeredUsers));
     
-    // Update current user locally if editing self
-    const currentUser = JSON.parse(localStorage.getItem("current_user"));
-    if (currentUser && currentUser.uid === uid) {
-      currentUser.role = newRole;
-      localStorage.setItem("current_user", JSON.stringify(currentUser));
-      renderUserAuth();
-    }
-    
     showToast(`Роль пользователя ${user.username} изменена с ${oldRole} на ${newRole}`, "success");
+    // Re-render and push to server
     renderAdminPanel("users");
+    syncPush();
   }
 }
 
