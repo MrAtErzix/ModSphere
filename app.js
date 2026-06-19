@@ -261,11 +261,29 @@ async function syncPush() {
       if (result.data) applyRemoteSyncData(result.data, true);
       lastSyncTime = new Date().toISOString();
       updateSyncStatusIndicator();
+      return true;
     }
   } catch(e) {
     console.log("Local sync push failed (expected if on static host):", e);
   }
+  return false;
 }
+
+function syncNow() {
+  showToast("🔄 Синхронизация...", "info");
+  syncPush().then(function(ok) {
+    if (ok) showToast("✅ Данные синхронизированы с сервером", "success");
+    else showToast("⚠️ Сервер недоступен, данные сохранены локально", "warning");
+  });
+  syncPull(false).then(function(changed) {
+    if (changed && window.location.hash === '#/admin') handleRoute();
+  });
+}
+
+// Sync on page unload to persist data
+window.addEventListener("beforeunload", function() {
+  syncPush();
+});
 
 async function syncPull(silent = true) {
   try {
@@ -332,13 +350,27 @@ localStorage.setItem = function(key, value) {
   if (key === "mods_data" || key === "registered_users" || key === "site_settings" || key === "activity_log") {
     if (syncPushTimeout) clearTimeout(syncPushTimeout);
     syncPushTimeout = setTimeout(syncPush, 500);
+    try { bcSync.postMessage({ key: key, value: value }); } catch(e) {}
   }
 };
+
+// Cross-tab sync via BroadcastChannel
+var bcSync;
+try { bcSync = new BroadcastChannel('modsphere_sync'); } catch(e) { bcSync = null; }
+if (bcSync) {
+  bcSync.onmessage = function(ev) {
+    if (ev.data && ev.data.key && ev.data.value !== undefined) {
+      var k = ev.data.key;
+      if (k === "mods_data" || k === "registered_users" || k === "site_settings" || k === "activity_log") {
+        originalSetItem.call(localStorage, k, ev.data.value);
+      }
+    }
+  };
+}
 
 // Initialize Application
 async function initApp() {
   initUserDatabase();
-  
   await syncPull(true);
   startSyncPolling();
 
@@ -4372,7 +4404,7 @@ function renderAdminPanel(activeTab = "mods", searchQuery = "", modSearchQuery =
         <h2><i class="fa-solid fa-crown" style="color: var(--primary-color); margin-right: 8px;"></i>Панель управления ModSphere</h2>
         <p>Модерация, пользователи, статистика и настройки платформы.</p>
         <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;">
-          <button class="btn btn-secondary btn-sm" onclick="syncPull(false).then(() => showToast('Данные синхронизированы', 'success'))"><i class="fa-solid fa-rotate"></i> Синхронизировать</button>
+          <button class="btn btn-secondary btn-sm" onclick="syncNow()"><i class="fa-solid fa-rotate"></i> Синхронизировать</button>
           <button class="btn btn-secondary btn-sm" onclick="exportAdminData()"><i class="fa-solid fa-file-export"></i> Экспорт JSON</button>
           <button class="btn btn-secondary btn-sm" onclick="document.getElementById('admin-import-file').click()"><i class="fa-solid fa-file-import"></i> Импорт JSON</button>
           <input type="file" id="admin-import-file" accept="application/json" style="display:none" onchange="importAdminData(event)">
@@ -4953,7 +4985,7 @@ function renderAdminToolsTab(users) {
         <p style="font-size:13px; color:var(--text-secondary); margin:12px 0;">Часто используемые операции.</p>
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
           <button class="btn btn-secondary btn-sm" onclick="bulkApproveMods()"><i class="fa-solid fa-check-double"></i> Одобрить все</button>
-          <button class="btn btn-secondary btn-sm" onclick="syncPull(false).then(() => showToast('Синхронизировано', 'success'))"><i class="fa-solid fa-cloud"></i> Синхр.</button>
+          <button class="btn btn-secondary btn-sm" onclick="syncNow()"><i class="fa-solid fa-cloud"></i> Синхр.</button>
           <button class="btn btn-secondary btn-sm" onclick="if(confirm('Удалить все неодобренные моды?')){ rejectAllPending() }"><i class="fa-solid fa-trash"></i> Очистить очередь</button>
         </div>
       </div>
